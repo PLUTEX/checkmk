@@ -63,16 +63,20 @@ def check_graylog_failures(_no_item, params, parsed):
                     long_output_str += ", Index: %s" % index
 
                 if failure.get("message"):
-                    message = json.loads(failure.get("message"))
-                    if message is not None:
-                        for key, infotext in [
-                            ("type", "Type:"),
-                            ("reason", "Reason"),
-                        ]:
+                    # Elasticsearch errors are not JSON encoded
+                    try:
+                        message = json.loads(failure.get("message"))
+                        if message is not None:
+                            for key, infotext in [
+                                ("type", "Type:"),
+                                ("reason", "Reason"),
+                            ]:
 
-                            value = message.get(key)
-                            if value is not None:
-                                long_output_str += ", %s %s" % (infotext, value)
+                                value = message.get(key)
+                                if value is not None:
+                                    long_output_str += ", %s %s" % (infotext, value)
+                    except json.JSONDecodeError:
+                        pass
 
                 long_output.append(long_output_str)
 
