@@ -177,7 +177,8 @@ def check_mysql_connections(_no_item, params, data):
 
     status_txt = 'Max. parallel connections since server start'
     yield check_levels(
-        value=perc_used,
+        # Never report more than 100% used
+        value=min(perc_used, 100.0),
         dsname='connections_perc_used',
         params=params.get('perc_used'),
         human_readable_func=get_percent_human_readable,
