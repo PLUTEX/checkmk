@@ -12,6 +12,7 @@ from ..agent_based_api.v1 import (
     any_of,
     check_levels,
     equals,
+    exists,
     render,
     Result,
     startswith,
@@ -30,6 +31,9 @@ DETECT_UPS_GENERIC = any_of(
     startswith(".1.3.6.1.2.1.1.2.0", ".1.3.6.1.4.1.5491"),
     startswith(".1.3.6.1.2.1.1.2.0", ".1.3.6.1.4.1.705.1"),
     startswith(".1.3.6.1.2.1.1.2.0", ".1.3.6.1.4.1.818.1.100.1"),
+    # We have all kinds of devices reporting UPS information
+    # So simply test for the existence of the corresponding OID
+    exists(".1.3.6.1.2.1.33.1.1.2.0"),
 )
 
 

@@ -18,12 +18,17 @@ def ups_generic_scan_function(oid):
             oid(".1.3.6.1.2.1.1.2.0").startswith('.1.3.6.1.4.1.534.2') or
             oid(".1.3.6.1.2.1.1.2.0").startswith('.1.3.6.1.4.1.5491') or
             oid(".1.3.6.1.2.1.1.2.0").startswith('.1.3.6.1.4.1.705.1') or
-            oid(".1.3.6.1.2.1.1.2.0").startswith('.1.3.6.1.4.1.818.1.100.1'))
+            oid(".1.3.6.1.2.1.1.2.0").startswith('.1.3.6.1.4.1.818.1.100.1') or
+            # We have many UPS vendors and even non-UPS devices reporting UPS
+            # stats (Mikrotik), so simply test if there is a UPS model OID
+            oid(".1.3.6.1.2.1.33.1.1.2.0"))
 
 
 def discovery_ups_generic(info, default_levels_name):
     return [
         (idx, default_levels_name)  #
         for idx, raw_voltage, _raw_value in info  #
-        if raw_voltage and int(raw_voltage)
+        # Some of the UPS models we use (namely APC Bac
+        # Mikrotik) don't report an output voltage, so
+        if raw_voltage and int(raw_voltage) >= 0
     ]
