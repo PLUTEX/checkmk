@@ -24,6 +24,25 @@ from cmk.base.check_legacy_includes.size_trend import *  # pylint: disable=wildc
 # resolving legacy discovery results such as [("SUMMARY", "diskstat_default_levels")]. Furthermore,
 # it might also remove variables needed for accessing discovery rulesets.
 from cmk.base.check_legacy_includes.ucd_hr import *  # pylint: disable=wildcard-import,unused-wildcard-import
+
+inventory_df_exclude_mountpoints_prefixes = ['/run/user/', '/var/lib/ceph/osd/', '/run/k3s/', '/var/lib/kubelet/pods/']
+
+def inventory_hr_fs(info):
+    mplist = []
+    for hrtype, hrdescr, _hrunits, hrsize, _hrused in info:
+        hrdescr = fix_hr_fs_mountpoint(hrdescr)
+        # NOTE: These types are defined in the HR-TYPES-MIB.
+        #       .1.3.6.1.2.1.25.2.1 +
+        #                           +-> .4 "hrStorageFixedDisk"
+        if hrtype in [ ".1.3.6.1.2.1.25.2.1.4",
+                       # This strange value below is needed for VCenter Appliances
+                       ".1.3.6.1.2.1.25.2.3.1.2.4"] and \
+                hrdescr not in inventory_df_exclude_mountpoints and \
+                not any(hrdescr.startswith(prefix) for prefix in inventory_df_exclude_mountpoints_prefixes) and \
+                saveint(hrsize) != 0:
+            mplist.append(hrdescr)
+    return df_inventory(mplist)
+
 check_info["hr_fs"] = {
     'inventory_function': inventory_hr_fs,
     'check_function': check_hr_fs,
