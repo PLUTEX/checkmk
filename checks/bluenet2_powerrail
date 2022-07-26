@@ -165,73 +165,61 @@ def parse_bluenet2_powerrail(info):
         "45": (1, "fw version too new"),
     }
 
-    map_phase_types = {
-        "1": ("phases", "Phase", "voltage"),
-        "4": ("phases", "Phase", "current"),
-        "18": ("phases", "Phase", "appower"),
-        "19": ("phases", "Phase", "power"),
-        "23": ("phases", "Phase", "frequency"),
-        "7": ("rcm_phases", "RCM Phase", "differential_current_ac"),
-        "8": ("rcm_phases", "RCM Phase", "differential_current_dc"),
-    }
-
-    map_sensor_types = {
+    map_data_source_types = {
+        "1": "voltage",
+        "4": "current",
+        "7": "differential_current_ac",
+        "8": "differential_current_dc",
+        "18": "appower",
+        "19": "power",
+        "23": "frequency",
         "256": "temp",
         "257": "humidity",
     }
 
-    def get_item_name(descr, index_str):
-        return "%s %d" % (descr, int(index_str) + 1)
+    # in the order of the arguments in info
+    types = ("circuit", "phases", "outlets", "rcm_phases")
 
-    def get_pdu_name(pdu_info):
-        if pdu_info == "0":
-            return "Master"
-        return "PDU %s" % pdu_info
+    objects = {}
 
-    pre_parsed = {}
-    for oidend, _name in info[0]:
-        pre_parsed.setdefault(oidend, {"phases": [], "rcm_phases": []})
+    for index, ty in enumerate(types):
+        for oidend, guid, name, label in info[index]:
+            # TODO: check for collisions
+            objects[tuple(str(ord(x)) for x in guid[:-1])] = {
+                "type": ty,
+                "name": name,
+                "label": label,
+            }
 
-    for index, what in [(1, "phases"), (2, "rcm_phases")]:
-        for oidend, identifier in info[index]:
-            inlet_id = ".".join(oidend.split(".")[:2])
-            if inlet_id in pre_parsed:
-                pre_parsed[inlet_id][what].append([str(ord(x)) for x in identifier][:-1])
-
-    parsed = {"phases": {}, "rcm_phases": {}, "sensors": {}}
-    for oidend, ty, status, exponent_str, reading_str in info[3]:
+    for oidend, ty, status, exponent_str, reading_str in info[4]:
         status_info = map_status[status]
         reading = float(reading_str) * 10**int(exponent_str)
         oid_info = oidend.split(".")
-        identifier = oid_info[:-1]
+        obj = tuple(oid_info[:-1])
 
-        if ty in map_phase_types:
-            phase_ty, phase_txt, what = map_phase_types[ty]
-            for inlet_id, inlet_info in pre_parsed.items():
-                if identifier in inlet_info[phase_ty]:
-                    phase_name = get_item_name("%s %s" % (inlet_id, phase_txt), oid_info[3])
-                    parsed[phase_ty].setdefault(phase_name, {})
-                    parsed[phase_ty][phase_name].setdefault(what, (reading, status_info))
+        if obj in objects and ty in map_data_source_types:
+            objects[obj][map_data_source_types[ty]] = (reading, status_info)
 
-        elif ty in map_sensor_types:
-            # https://www.bachmann.com/fileadmin/05a_Downloads/BlueNet/BlueNet_BN3000_-_BN7500_V2.02.XX_Bedienungsanleitung_DE_Rev_01.pdf
-            # Example of OID_END: ...0.1.64.4.255.2.1.0
-            # 0   * number of pdu (pdu 0 -> Master PDU, 1, 2, 3,... -> Slave PDU)
-            # 1     sensor type (0: electrical, 1: external sensor, 4: rcm)
-            # 64    sensor hardware address (64: combination sensor, 72: temperature sensor, 56: GPIO module)
-            # 4   * channel number of internal multiplexer (channel 4, 5)
-            # 255 * channel number of external multiplexer (channel 255, 1, 2, 4, 8)
-            # 2     external sensor type (2: combination sensor, 1: temperature sensor, 3: GPIO module)
-            # 1.0   two byte key definition:
-            #           1.0: temperature, 1.1: humidity 1.10:dewpoint
-            #           1.2-1.5 GPIO in 1-4
-            #           1.6-1.9 GPIO out 1-4
-            # * becomes part of the item in order to make it unique
-            sensor_name = "Sensor %s %s/%s" % (get_pdu_name(oid_info[0]), oid_info[3], oid_info[4])
-            inst = parsed["sensors"].setdefault(map_sensor_types[ty], {})
-            inst.setdefault(sensor_name, (reading, status_info))
-
+    parsed = {
+        ty: {
+            obj['name']: obj
+            for obj in objects.values()
+            if obj['type'] == ty and len(obj) > 3
+        }
+        for ty in types
+    }
     return parsed
+
+
+def check_bluenet_pdu_outlets(item, params, parsed):
+    parsed = parsed["outlets"]
+    if item in parsed:
+        try:
+            yield 0, '[%s]' % parsed[item]["label"]
+        except KeyError:
+            pass
+
+        yield from check_elphase(item, params, parsed)
 
 
 check_info["bluenet2_powerrail"] = {
@@ -247,19 +235,33 @@ check_info["bluenet2_powerrail"] = {
             ".1.3.6.1.4.1.31770.2.2.6.2.1",
             [
                 OID_END,
+                "3",  # blueNet2CircuitGuid
                 "4",  # blueNet2CircuitName
+                "5",  # blueNet2CircuitLabel
             ]),
         (
             ".1.3.6.1.4.1.31770.2.2.6.3.1",
             [
                 OID_END,
                 "4",  # blueNet2PhaseGuid
+                "5",  # blueNet2PhaseName
+                "6",  # blueNet2PhaseLabel
+            ]),
+        (
+            ".1.3.6.1.4.1.31770.2.2.6.5.1",
+            [
+                OID_END,
+                "6",  # blueNet2SocketGuid
+                "7",  # blueNet2SocketName
+                "8",  # blueNet2SocketLabel
             ]),
         (
             ".1.3.6.1.4.1.31770.2.2.6.6.1",
             [
                 OID_END,
                 "7",  # blueNet2RcmGuid
+                "8",  # blueNet2RcmName
+                "9",  # blueNet2RcmLabel
             ]),
         (
             ".1.3.6.1.4.1.31770.2.2.8",
@@ -271,7 +273,16 @@ check_info["bluenet2_powerrail"] = {
                 "4.1.5",  # bluenet2VariableDataValue
             ])
     ],
-    'group': 'el_inphase',
+    'group': 'ups_outphase',
+}
+
+# Outlets
+check_info["bluenet2_powerrail.outlet"] = {
+    "inventory_function": lambda parsed: inventory_elphase(parsed["outlets"]),
+    "check_function": check_bluenet_pdu_outlets,
+    "service_description": "Outlet %s",
+    "has_perfdata": True,
+    "group": "ups_outphase",
 }
 
 #.
@@ -298,78 +309,4 @@ check_info["bluenet2_powerrail.rcm"] = {
     "has_perfdata": True,
     "default_levels_variable": "bluenet2_powerrail_rcm_default_levels",
     'group': 'el_inphase',
-}
-
-#.
-#   .--temperature---------------------------------------------------------.
-#   |      _                                      _                        |
-#   |     | |_ ___ _ __ ___  _ __   ___ _ __ __ _| |_ _   _ _ __ ___       |
-#   |     | __/ _ \ '_ ` _ \| '_ \ / _ \ '__/ _` | __| | | | '__/ _ \      |
-#   |     | ||  __/ | | | | | |_) |  __/ | | (_| | |_| |_| | | |  __/      |
-#   |      \__\___|_| |_| |_| .__/ \___|_|  \__,_|\__|\__,_|_|  \___|      |
-#   |                       |_|                                            |
-#   '----------------------------------------------------------------------'
-
-# Suggested by customer
-factory_settings["bluenet2_powerrail_temp_default_levels"] = {
-    "levels": (30, 35),
-}
-
-
-def inventory_bluenet2_powerrail_temp(parsed):
-    for item in parsed["sensors"].get("temp", {}):
-        yield item, {}
-
-
-def check_bluenet2_powerrail_temp(item, params, parsed):
-    if item in parsed["sensors"].get("temp", {}):
-        reading, (state, state_readable) = parsed["sensors"]["temp"][item]
-        return check_temperature(reading,
-                                 params,
-                                 "bluenet2_powerrail_temp_%s" % item,
-                                 dev_status=state,
-                                 dev_status_name=state_readable)
-
-
-check_info["bluenet2_powerrail.temp"] = {
-    "inventory_function": inventory_bluenet2_powerrail_temp,
-    "check_function": check_bluenet2_powerrail_temp,
-    "service_description": "Temperature %s",
-    "has_perfdata": True,
-    "default_levels_variable": "bluenet2_powerrail_temp_default_levels",
-    "group": "temperature",
-}
-
-#.
-#   .--humidity------------------------------------------------------------.
-#   |              _                     _     _ _ _                       |
-#   |             | |__  _   _ _ __ ___ (_) __| (_) |_ _   _               |
-#   |             | '_ \| | | | '_ ` _ \| |/ _` | | __| | | |              |
-#   |             | | | | |_| | | | | | | | (_| | | |_| |_| |              |
-#   |             |_| |_|\__,_|_| |_| |_|_|\__,_|_|\__|\__, |              |
-#   |                                                  |___/               |
-#   '----------------------------------------------------------------------'
-
-# Suggested by customer
-bluenet2_powerrail_humidity_default_levels = (5, 8, 75, 80)
-
-
-def inventory_bluenet2_powerrail_humidity(parsed):
-    for item in parsed["sensors"].get("humidity", {}):
-        yield item, "bluenet2_powerrail_humidity_default_levels"
-
-
-def check_bluenet2_powerrail_humidity(item, params, parsed):
-    if item in parsed["sensors"].get("humidity", {}):
-        reading, (state, state_readable) = parsed["sensors"]["humidity"][item]
-        yield check_humidity(reading, params)
-        yield state, state_readable
-
-
-check_info["bluenet2_powerrail.humidity"] = {
-    "inventory_function": inventory_bluenet2_powerrail_humidity,
-    "check_function": check_bluenet2_powerrail_humidity,
-    'service_description': 'Humidity %s',
-    "has_perfdata": True,
-    "group": "humidity",
 }
