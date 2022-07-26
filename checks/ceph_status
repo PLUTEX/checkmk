@@ -10,13 +10,21 @@ import json
 def parse_ceph_status(info):
 
     joined_lines = [" ".join(line) for line in info]
-    parsed = json.loads("".join(joined_lines))
 
-    # ceph health' JSON format has changed in luminous
-    if "health" in parsed and "status" not in parsed["health"]:
-        parsed["health"]["status"] = parsed["health"].get("overall_status")
+    # Support parsing multiple JSON documents to support cluster checks
+    json_decoder = json.JSONDecoder()
+    offset = 0
+    joined = ''.join(joined_lines)
+    while offset < len(joined):
+        parsed, add_offset = json_decoder.raw_decode(joined[offset:])
+        offset += add_offset
 
-    return parsed
+        # ceph health' JSON format has changed in luminous
+        if "health" in parsed and "status" not in parsed["health"]:
+            parsed["health"]["status"] = parsed["health"].get("overall_status")
+
+        if parsed.get("health", {}).get("status"):
+            return parsed
 
 
 def ceph_check_epoch(id_, epoch, params):
