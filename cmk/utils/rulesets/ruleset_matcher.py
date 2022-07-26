@@ -6,7 +6,7 @@
 
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from re import Pattern
-from typing import Any, cast, Generic, NamedTuple, Required, TypedDict, TypeVar
+from typing import Any, cast, Generic, NamedTuple, Required, TypedDict, TypeVar, FrozenSet, Optional
 
 from cmk.utils.caching import instance_method_lru_cache
 from cmk.utils.exceptions import MKGeneralException
@@ -249,13 +249,13 @@ class RulesetMatcher:
             match_object.host_name not in self.ruleset_optimizer.all_processed_hosts()
         )
 
+        assert match_object.host_name is not None
         optimized_ruleset: PreprocessedHostRuleset[
             TRuleValue
         ] = self.ruleset_optimizer.get_host_ruleset(
-            ruleset, with_foreign_hosts, is_binary=is_binary
+            ruleset, with_foreign_hosts, is_binary=is_binary, limit=frozenset(
+                (match_object.host_name,))
         )
-
-        assert match_object.host_name is not None
         default: PreprocessedHostRuleset[TRuleValue] = {}
         yield from optimized_ruleset.get(match_object.host_name, default)
 
@@ -300,7 +300,10 @@ class RulesetMatcher:
         with_foreign_hosts = (
             match_object.host_name not in self.ruleset_optimizer.all_processed_hosts()
         )
-        optimized_ruleset = self.ruleset_optimizer.get_service_ruleset(ruleset, with_foreign_hosts)
+        optimized_ruleset = self.ruleset_optimizer.get_service_ruleset(
+            ruleset, with_foreign_hosts, limit=frozenset(
+               (match_object.host_name,))
+        )
 
         for (
             value,
@@ -504,21 +507,23 @@ class RulesetOptimizer:
         )
 
     def get_host_ruleset(
-        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool, is_binary: bool
+        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool, is_binary: bool,
+        limit: Optional[FrozenSet[str]] = None
     ) -> PreprocessedHostRuleset[TRuleValue]:
-        cache_id = id(ruleset), with_foreign_hosts
+        cache_id = id(ruleset), with_foreign_hosts, limit
 
         if cache_id in self._host_ruleset_cache:
             return self._host_ruleset_cache[cache_id]
 
         host_ruleset: PreprocessedHostRuleset[TRuleValue] = self._convert_host_ruleset(
-            ruleset, with_foreign_hosts, is_binary
+            ruleset, with_foreign_hosts, is_binary, limit
         )
         self._host_ruleset_cache[cache_id] = host_ruleset
         return host_ruleset
 
     def _convert_host_ruleset(
-        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool, is_binary: bool
+        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool, is_binary: bool,
+        limit: Optional[Iterable[str]] = None
     ) -> PreprocessedHostRuleset[TRuleValue]:
         """Precompute host lookup map
 
@@ -530,27 +535,30 @@ class RulesetOptimizer:
             if _is_disabled(rule):
                 continue
 
-            for hostname in self._all_matching_hosts(rule["condition"], with_foreign_hosts):
+            for hostname in self._all_matching_hosts(rule["condition"], with_foreign_hosts, limit):
                 host_values.setdefault(hostname, []).append(rule["value"])
 
         return host_values
 
     def get_service_ruleset(
-        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool
+        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool,
+        limit: Optional[FrozenSet[str]] = None
     ) -> PreprocessedServiceRuleset:
-        cache_id = id(ruleset), with_foreign_hosts
+        cache_id = id(ruleset), with_foreign_hosts, limit
 
         if cache_id in self._service_ruleset_cache:
             return self._service_ruleset_cache[cache_id]
 
         cached_ruleset = self._convert_service_ruleset(
-            ruleset, with_foreign_hosts=with_foreign_hosts
+            ruleset, with_foreign_hosts=with_foreign_hosts,
+            limit=limit
         )
         self._service_ruleset_cache[cache_id] = cached_ruleset
         return cached_ruleset
 
     def _convert_service_ruleset(
-        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool
+        self, ruleset: Iterable[RuleSpec[TRuleValue]], with_foreign_hosts: bool,
+        limit: Optional[FrozenSet[str]] = None
     ) -> PreprocessedServiceRuleset:
         new_rules: PreprocessedServiceRuleset = []
         for rule in ruleset:
@@ -559,7 +567,7 @@ class RulesetOptimizer:
 
             # Directly compute set of all matching hosts here, this will avoid
             # recomputation later
-            hosts = self._all_matching_hosts(rule["condition"], with_foreign_hosts)
+            hosts = self._all_matching_hosts(rule["condition"], with_foreign_hosts, limit)
 
             # Prepare cache id
             service_labels_condition = rule["condition"].get("service_labels", {})
@@ -603,7 +611,8 @@ class RulesetOptimizer:
         return negate, regex("(?:%s)" % "|".join("(?:%s)" % p for p in pattern_parts))
 
     def _all_matching_hosts(  # pylint: disable=too-many-branches
-        self, condition: RuleConditionsSpec, with_foreign_hosts: bool
+        self, condition: RuleConditionsSpec, with_foreign_hosts: bool,
+        limit: Optional[Iterable[str]] = None
     ) -> set[HostName]:
         """Returns a set containing the names of hosts that match the given
         tags and hostlist conditions."""
@@ -620,6 +629,7 @@ class RulesetOptimizer:
                 rule_path,
             ),
             with_foreign_hosts,
+            limit,
         )
 
         try:
@@ -627,7 +637,9 @@ class RulesetOptimizer:
         except KeyError:
             pass
 
-        if with_foreign_hosts:
+        if limit:
+            valid_hosts = set(limit)
+        elif with_foreign_hosts:
             valid_hosts = self._all_configured_hosts
         else:
             valid_hosts = self._all_processed_hosts
