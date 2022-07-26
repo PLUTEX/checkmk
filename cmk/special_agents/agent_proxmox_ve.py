@@ -479,6 +479,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
                                 {
                                     "{vmid}": {
                                         "snapshot": [],
+                                        "config": {},
                                     }
                                 }
                             ],
@@ -486,9 +487,11 @@ def agent_proxmox_ve_main(args: Args) -> None:
                                 {
                                     "{vmid}": {
                                         "snapshot": [],
+                                        "config": {},
                                     }
                                 }
                             ],
+                            "storage": [],
                             "version": {},
                             "time": {},
                         },
@@ -527,6 +530,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
 
     node_timezones = {}  # Timezones on nodes can be potentially different
     snapshot_data = {}
+    config_data = {}
 
     for node in data["nodes"]:
         node_timezones[node["node"]] = node["time"]["timezone"]
@@ -557,6 +561,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
         logged_backup_data[vmid]["started_time"] = date_to_utc(
             logged_backup_data[vmid]["started_time"], tz
         )
+        config_data[str(vm["vmid"])] = vm["config"]
 
     LOGGER.info("all VMs:          %r", backup_data["vmids"])
     LOGGER.info("expected backups: %r", backup_data["scheduled_vmids"])
@@ -601,6 +606,11 @@ def agent_proxmox_ve_main(args: Args) -> None:
                 )
             with SectionWriter("uptime", separator=None) as writer:
                 writer.append(node["uptime"])
+            with SectionWriter("proxmox_ve_node_backup_status") as writer:
+                writer.append_json(task for task in node["tasks"] if task["type"] == "vzdump")
+            with SectionWriter("proxmox_ve_node_storages") as writer:
+                writer.append_json(storage for storage in node["storage"])
+
 
     for vmid, vm in all_vms.items():
         with ConditionalPiggybackSection(vm["name"]):
@@ -612,6 +622,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
                         "type": vm["type"],
                         "status": vm["status"],
                         "name": vm["name"],
+                        "config": config_data[vmid]
                     }
                 )
             if vm["type"] != "qemu":
@@ -728,7 +739,10 @@ class ProxmoxVeSession:
 
     def get_api_element(self, path: str) -> Any:
         """do an API GET request"""
-        response_json = self.get_raw("api2/json/" + path).json()
+        response = self.get_raw("api2/json/" + path)
+        if not response.text:
+            return None
+        response_json = response.json()
         if "errors" in response_json:
             raise RuntimeError("Could not fetch %r (%r)" % (path, response_json["errors"]))
         return response_json.get("data")
