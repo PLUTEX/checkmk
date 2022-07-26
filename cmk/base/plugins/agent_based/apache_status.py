@@ -204,7 +204,7 @@ def check_apache_status(item: str, params: Mapping[str, Any], section: Section) 
 
     for key, label in ((k, l) for k, l in _CHECK_LEVEL_ENTRIES if k in data):
         value = data[key]
-        levels_are_lower = key == "OpenSlots"
+        levels_are_lower = key in ("OpenSlots", "IdleWorkers")
         notice_only = key not in {"Uptime", "IdleWorkers", "BusyWorkers", "TotalSlots"}
 
         renderer = None
