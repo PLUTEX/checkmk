@@ -90,7 +90,10 @@ def parse_systemd_units(info):
             "UnitEntry", ['name', 'type', 'load', 'active', 'sub', 'description', 'state'])
 
         for row in iter_info:
-            if row[0] == '*':
+            # Also recognize the UTF-8 character that marks active units.
+            # This should be obsolete after 2.1.0
+            # -- 2022-04-14 jpl@plutex.de
+            if row[0] in {'●', '*'}:
                 row.pop(0)
             line = ' '.join(row)
             for unit_marker in _SYSTEMD_UNITS:
