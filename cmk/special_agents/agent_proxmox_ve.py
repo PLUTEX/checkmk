@@ -478,6 +478,7 @@ def agent_proxmox_ve_main(args: Args) -> int:
                                 {
                                     "{vmid}": {
                                         "snapshot": [],
+                                        "config": {},
                                     }
                                 }
                             ],
@@ -485,9 +486,11 @@ def agent_proxmox_ve_main(args: Args) -> int:
                                 {
                                     "{vmid}": {
                                         "snapshot": [],
+                                        "config": {},
                                     }
                                 }
                             ],
+                            "storage": [],
                             "version": {},
                             "time": {},
                         },
@@ -526,6 +529,7 @@ def agent_proxmox_ve_main(args: Args) -> int:
 
     node_timezones = {}  # Timezones on nodes can be potentially different
     snapshot_data = {}
+    config_data = {}
 
     for node in data["nodes"]:
         if (timezone := node["time"].get("timezone")) is not None:
@@ -557,6 +561,7 @@ def agent_proxmox_ve_main(args: Args) -> int:
         logged_backup_data[vmid]["started_time"] = date_to_utc(
             logged_backup_data[vmid]["started_time"], tz
         )
+        config_data[str(vm["vmid"])] = vm["config"]
 
     LOGGER.info("all VMs:          %r", backup_data["vmids"])
     LOGGER.info("expected backups: %r", backup_data["scheduled_vmids"])
@@ -603,6 +608,10 @@ def agent_proxmox_ve_main(args: Args) -> int:
             if "uptime" in node:
                 with SectionWriter("uptime", separator=None) as writer:
                     writer.append(node["uptime"])
+            with SectionWriter("proxmox_ve_node_backup_status") as writer:
+                writer.append_json(task for task in node["tasks"] if task["type"] == "vzdump")
+            with SectionWriter("proxmox_ve_node_storages") as writer:
+                writer.append_json(storage for storage in node["storage"])
 
     for vmid, vm in all_vms.items():
         with ConditionalPiggybackSection(vm["name"]):
@@ -614,6 +623,7 @@ def agent_proxmox_ve_main(args: Args) -> int:
                         "type": vm["type"],
                         "status": vm["status"],
                         "name": vm["name"],
+                        "config": config_data[vmid]
                     }
                 )
             if vm["type"] != "qemu":
