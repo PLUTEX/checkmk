@@ -432,13 +432,16 @@ def agent_proxmox_ve_main(args: Args) -> None:
                     "qemu": [{
                         "{vmid}": {
                             "snapshot": [],
+                            "config": {},
                         }
                     }],
                     "lxc": [{
                         "{vmid}": {
                             "snapshot": [],
+                            "config": {},
                         }
                     }],
+                    "storage": [],
                     "version": {},
                 },
             }],
@@ -469,6 +472,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
     }
 
     snapshot_data = {}
+    config_data = {}
 
     for node in data["nodes"]:
         # only lxc and qemu can have snapshots
@@ -476,6 +480,8 @@ def agent_proxmox_ve_main(args: Args) -> None:
             snapshot_data[str(vm["vmid"])] = {
                 "snaptimes": [x["snaptime"] for x in vm["snapshot"] if "snaptime" in x],
             }
+
+            config_data[str(vm["vmid"])] = vm["config"]
 
     LOGGER.info("all VMs:          %r", backup_data["vmids"])
     LOGGER.info("expected backups: %r", backup_data["scheduled_vmids"])
@@ -490,8 +496,8 @@ def agent_proxmox_ve_main(args: Args) -> None:
             with SectionWriter("proxmox_ve_node_info") as writer:
                 writer.append_json({
                     "status": node["status"],
-                    "lxc": [vmid for vmid in all_vms if all_vms[vmid]["type"] == "lxc"],
-                    "qemu": [vmid for vmid in all_vms if all_vms[vmid]["type"] == "qemu"],
+                    "lxc": node["lxc"],
+                    "qemu": node["qemu"],
                     "proxmox_ve_version": node["version"],
                     "subscription": {
                         key: value for key, value in node["subscription"].items() if key in {
@@ -512,6 +518,11 @@ def agent_proxmox_ve_main(args: Args) -> None:
                 })
             with SectionWriter("uptime", separator=None) as writer:
                 writer.append(node["uptime"])
+            with SectionWriter("proxmox_ve_node_backup_status") as writer:
+                writer.append_json(task for task in node["tasks"] if task["type"] == "vzdump")
+            with SectionWriter("proxmox_ve_node_storages") as writer:
+                writer.append_json(storage for storage in node["storage"])
+
 
     for vmid, vm in all_vms.items():
         with ConditionalPiggybackSection(vm["name"]):
@@ -522,6 +533,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
                     "type": vm["type"],
                     "status": vm["status"],
                     "name": vm["name"],
+                    "config": config_data[vmid]
                 })
             if vm["type"] != "qemu":
                 with SectionWriter("proxmox_ve_disk_usage") as writer:
@@ -622,7 +634,10 @@ class ProxmoxVeSession:
 
     def get_api_element(self, path: str) -> Any:
         """do an API GET request"""
-        response_json = self.get_raw("api2/json/" + path).json()
+        response = self.get_raw("api2/json/" + path)
+        if not response.text:
+            return None
+        response_json = response.json()
         if "errors" in response_json:
             raise RuntimeError("Could not fetch %r (%r)" % (path, response_json["errors"]))
         return response_json.get("data")
