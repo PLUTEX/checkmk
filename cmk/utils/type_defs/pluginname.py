@@ -73,6 +73,8 @@ class ABCName(abc.ABC):
         return self._value
 
     def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return self._value == other
         if not isinstance(other, self.__class__):
             raise TypeError(f"cannot compare {self!r} and {other!r}")
         return self._value == other._value
