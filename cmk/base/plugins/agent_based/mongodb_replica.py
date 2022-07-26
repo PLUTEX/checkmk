@@ -6,7 +6,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Dict
 
 from .agent_based_api.v1 import register, Result, Service, State
 from .agent_based_api.v1.type_defs import CheckResult, DiscoveryResult, StringTable
@@ -107,9 +107,19 @@ def check_mongodb_replica(section: ReplicaSet) -> CheckResult:
     ))
 
 
+def check_mongodb_replica_cluster(
+    section: Dict[str, ReplicaSet],
+) -> CheckResult:
+    for section in section.values():
+        if section:
+            yield from check_mongodb_replica(section)
+            return
+
+
 register.check_plugin(
     name="mongodb_replica",
     service_name="MongoDB Replica Set Status",
     discovery_function=discover_mongodb_replica,
     check_function=check_mongodb_replica,
+    cluster_check_function=check_mongodb_replica_cluster,
 )
