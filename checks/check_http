@@ -256,7 +256,9 @@ def check_http_description(params):
 
 
 active_check_info["http"] = {
-    "command_line": "check_http $ARG1$",
+    # Change path to check executable so we can overwrite it locally.
+    # -- jpl@plutex.de, 2021-11-25
+    "command_line": '$USER2$/check_http $ARG1$',
     "argument_function": check_http_arguments,
     "service_description": check_http_description,
     "has_perfdata": True,
