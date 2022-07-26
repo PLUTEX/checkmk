@@ -36,7 +36,7 @@ factory_settings["smart_temp_default_levels"] = {"levels": (35, 40)}
 
 
 def inventory_smart_temp(section):
-    relevant = {"Temperature_Celsius", "Temperature_Internal", "Temperature"}
+    relevant = {"Temperature_Celsius", "Temperature_Internal", "Temperature", "Airflow_Temperature_Cel"}
     for disk_name, disk in section.items():
         if relevant.intersection(disk):
             yield disk_name, {}
@@ -53,6 +53,8 @@ def check_smart_temp(item, params, section):
         temperature = data["Temperature_Internal"]
     elif "Temperature" in data:
         temperature = data["Temperature"]
+    elif "Airflow_Temperature_Cel" in data:
+        temperature = data["Airflow_Temperature_Cel"]
     else:
         return
 
