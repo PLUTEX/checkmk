@@ -93,7 +93,7 @@ class HelperConfig:
             if config_path.is_symlink() or not config_path.is_dir():
                 continue
 
-            if config_path == latest_config_path:
+            if config_path.resolve() == latest_config_path:
                 continue
 
             shutil.rmtree(config_path)
