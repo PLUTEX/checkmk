@@ -133,9 +133,16 @@ def check_ipmi_detailed(
     status_txt_mapping: StatusTxtMapping,
 ) -> type_defs.CheckResult:
 
+    # v2.0.0p22 removed the ability to override the BMC-supplied state.
+    # This re-adds that functionality.
+    state = status_txt_mapping(sensor.status_txt)
+    for wato_status_txt, wato_status in params.get("sensor_states", []):
+        if sensor.status_txt.startswith(wato_status_txt):
+            state = State(wato_status)
+
     # stay compatible with older versions
     yield Result(
-        state=status_txt_mapping(sensor.status_txt),
+        state=state,
         summary="Status: %s" % sensor.status_txt,
     )
 
@@ -179,11 +186,6 @@ def check_ipmi_detailed(
             params,
             sensor.unit,
         )
-
-    for wato_status_txt, wato_status in params.get("sensor_states", []):
-        if sensor.status_txt.startswith(wato_status_txt):
-            yield Result(state=State(wato_status), summary="User-defined state")
-            break
 
     # Sensor reports 'nc' ('non critical'), so we set the state to WARNING
     if sensor.status_txt.startswith('nc'):
