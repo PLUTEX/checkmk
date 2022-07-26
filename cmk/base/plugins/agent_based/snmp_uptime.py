@@ -29,6 +29,10 @@ def parse_snmp_uptime(string_table: StringTable) -> Optional[uptime.Section]:
     if len(ticks) < 3:
         return None
 
+    # Handle negative numbers due to 32bit integer overflow on buggy agents.
+    if ticks.startswith('-'):
+        ticks = str(int(ticks) + 2**32 - 1)
+
     try:
         return uptime.Section(int(ticks[:-2]), None)
     except Exception:
