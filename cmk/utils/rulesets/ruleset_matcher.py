@@ -7,6 +7,7 @@
 from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from re import Pattern
 from typing import Any, cast, Generic, NamedTuple, Required, TypedDict, TypeVar, FrozenSet, Optional
+from functools import cache
 
 from cmk.utils.caching import instance_method_lru_cache
 from cmk.utils.exceptions import MKGeneralException
@@ -903,6 +904,7 @@ class RulesetOptimizer:
             match_object, self._labels.host_label_rules
         )
 
+    @cache
     def _discovered_labels_of_host(self, hostname: HostName) -> Labels:
         return (
             self._load_discovered_labels_file(hostname)

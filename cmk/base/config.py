@@ -32,6 +32,7 @@ from collections.abc import (
     Sequence,
 )
 from enum import Enum
+from functools import cache
 from importlib.util import MAGIC_NUMBER as _MAGIC_NUMBER
 from pathlib import Path
 from typing import Any, AnyStr, Final, Literal, NamedTuple, overload, Protocol, TypedDict, Union
@@ -2859,6 +2860,7 @@ class ConfigCache:
             logger=logger,
         )
 
+    @cache
     def _discovered_labels_of_service(
         self,
         hostname: HostName,
