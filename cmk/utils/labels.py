@@ -7,6 +7,7 @@
 
 import abc
 import os
+from functools import cache
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Tuple
 
@@ -73,6 +74,7 @@ class LabelManager:
         match_object = RulesetMatchObject(hostname, service_description=None)
         return ruleset_matcher.get_host_ruleset_merged_dict(match_object, self._host_label_rules)
 
+    @cache
     def _discovered_labels_of_host(self, hostname: HostName) -> Labels:
         return {
             label_id: label["value"]

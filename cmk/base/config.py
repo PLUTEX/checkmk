@@ -3473,6 +3473,7 @@ class ConfigCache:
         # Keep HostConfig instances created with the current configuration cache
         self._host_configs: Dict[HostName, HostConfig] = {}
 
+    @lru_cache(maxsize=None)
     def _discovered_labels_of_service(
         self,
         hostname: HostName,
