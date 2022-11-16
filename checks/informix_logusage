@@ -47,7 +47,8 @@ def check_informix_logusage(item, params, parsed):
         for entry in data:
             pagesize = int(entry["sh_pagesize"])
             size += int(entry["size"]) * pagesize
-            used += int(entry["used"]) * pagesize
+            if entry["is_backed_up"] != "1":
+                used += int(entry["used"]) * pagesize
 
         infotext = "Files: %s, Size: %s, Used: %s" % (
             logfiles,
