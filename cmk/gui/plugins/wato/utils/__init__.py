@@ -14,7 +14,7 @@ import re
 import subprocess
 import urllib.parse
 from contextlib import nullcontext
-from typing import Any, Callable, cast, ContextManager, Dict, List, Mapping
+from typing import Any, Callable, cast, ContextManager, Dict, List, Literal, Mapping
 from typing import Optional as _Optional
 from typing import Tuple as _Tuple
 from typing import Type, Union
@@ -345,12 +345,18 @@ def SNMPCredentials(  # pylint: disable=redefined-builtin
     else:
         title = title if title is not None else _("SNMP credentials")
 
+    def validate(value: Any, _prefix: str):
+        if isinstance(value, (str, tuple)):
+            return
+        raise MKUserError(None, "Invalid Format for SNMP credentials")
+
     return Alternative(
         title=title,
         help=help,
         default_value=default_value,
         match=match,
         elements=elements,
+        validate=validate,
     )
 
 
@@ -1388,9 +1394,8 @@ class ABCEventsMode(WatoMode, abc.ABC):
     def _rule_match_conditions(cls):
         raise NotImplementedError()
 
-    # flavour = "notify" or "alert"
     @classmethod
-    def _event_rule_match_conditions(cls, flavour):
+    def _event_rule_match_conditions(cls, flavour: Literal["notify", "alerts"]):
         if flavour == "notify":
             add_choices = [
                 ("f", _("Start or end of flapping state")),
@@ -1418,18 +1423,7 @@ class ABCEventsMode(WatoMode, abc.ABC):
                         )
                         % "wato.py?mode=edit_ruleset&varname=extra_host_conf%3Anotification_options"
                     ),
-                    choices=[
-                        ("rd", _("UP") + " ➤ " + _("DOWN")),
-                        ("ru", _("UP") + " ➤ " + _("UNREACHABLE")),
-                        ("dr", _("DOWN") + " ➤ " + _("UP")),
-                        ("du", _("DOWN") + " ➤ " + _("UNREACHABLE")),
-                        ("ud", _("UNREACHABLE") + " ➤ " + _("DOWN")),
-                        ("ur", _("UNREACHABLE") + " ➤ " + _("UP")),
-                        ("?r", _("any") + " ➤ " + _("UP")),
-                        ("?d", _("any") + " ➤ " + _("DOWN")),
-                        ("?u", _("any") + " ➤ " + _("UNREACHABLE")),
-                    ]
-                    + add_choices,
+                    choices=_get_host_event_choices(add_choices),
                     default_value=[
                         "rd",
                         "dr",
@@ -1450,26 +1444,7 @@ class ABCEventsMode(WatoMode, abc.ABC):
                         )
                         % "wato.py?mode=edit_ruleset&varname=extra_service_conf%3Anotification_options"
                     ),
-                    choices=[
-                        ("rw", _("OK") + " ➤ " + _("WARN")),
-                        ("rr", _("OK") + " ➤ " + _("OK")),
-                        ("rc", _("OK") + " ➤ " + _("CRIT")),
-                        ("ru", _("OK") + " ➤ " + _("UNKNOWN")),
-                        ("wr", _("WARN") + " ➤ " + _("OK")),
-                        ("wc", _("WARN") + " ➤ " + _("CRIT")),
-                        ("wu", _("WARN") + " ➤ " + _("UNKNOWN")),
-                        ("cr", _("CRIT") + " ➤ " + _("OK")),
-                        ("cw", _("CRIT") + " ➤ " + _("WARN")),
-                        ("cu", _("CRIT") + " ➤ " + _("UNKNOWN")),
-                        ("ur", _("UNKNOWN") + " ➤ " + _("OK")),
-                        ("uw", _("UNKNOWN") + " ➤ " + _("WARN")),
-                        ("uc", _("UNKNOWN") + " ➤ " + _("CRIT")),
-                        ("?r", _("any") + " ➤ " + _("OK")),
-                        ("?w", _("any") + " ➤ " + _("WARN")),
-                        ("?c", _("any") + " ➤ " + _("CRIT")),
-                        ("?u", _("any") + " ➤ " + _("UNKNOWN")),
-                    ]
-                    + add_choices,
+                    choices=_get_service_event_choices(flavour, add_choices),
                     default_value=[
                         "rw",
                         "rc",
@@ -1704,6 +1679,65 @@ class ABCEventsMode(WatoMode, abc.ABC):
                 self._add_change(
                     what + "-move-rule", _("Changed position of %s %d") % (what_title, from_pos)
                 )
+
+
+def _get_host_event_choices(add_choices: List[_Tuple[str, str]]) -> List[_Tuple[str, str]]:
+    return [
+        ("rd", _("UP") + " ➤ " + _("DOWN")),
+        ("ru", _("UP") + " ➤ " + _("UNREACHABLE")),
+        ("dr", _("DOWN") + " ➤ " + _("UP")),
+        ("du", _("DOWN") + " ➤ " + _("UNREACHABLE")),
+        ("ud", _("UNREACHABLE") + " ➤ " + _("DOWN")),
+        ("ur", _("UNREACHABLE") + " ➤ " + _("UP")),
+        ("?r", _("any") + " ➤ " + _("UP")),
+        ("?d", _("any") + " ➤ " + _("DOWN")),
+        ("?u", _("any") + " ➤ " + _("UNREACHABLE")),
+    ] + add_choices
+
+
+def _get_service_event_choices(
+    flavour: Literal["notify", "alerts"], add_choices: List[_Tuple[str, str]]
+) -> List[_Tuple[str, str]]:
+    """Alert handler need some more options, this function is just to keep the sort order"""
+    choices: List[_Tuple[str, str]] = [
+        ("rr", _("OK") + " ➤ " + _("OK")),
+        ("rw", _("OK") + " ➤ " + _("WARN")),
+        ("rc", _("OK") + " ➤ " + _("CRIT")),
+        ("ru", _("OK") + " ➤ " + _("UNKNOWN")),
+        ("wr", _("WARN") + " ➤ " + _("OK")),
+    ]
+
+    if flavour == "alerts":
+        choices += [("ww", _("WARN") + " ➤ " + _("WARN"))]
+
+    choices += [
+        ("wc", _("WARN") + " ➤ " + _("CRIT")),
+        ("wu", _("WARN") + " ➤ " + _("UNKNOWN")),
+        ("cr", _("CRIT") + " ➤ " + _("OK")),
+        ("cw", _("CRIT") + " ➤ " + _("WARN")),
+    ]
+
+    if flavour == "alerts":
+        choices += [("cc", _("CRIT") + " ➤ " + _("CRIT"))]
+
+    choices += [
+        ("cu", _("CRIT") + " ➤ " + _("UNKNOWN")),
+        ("ur", _("UNKNOWN") + " ➤ " + _("OK")),
+        ("uw", _("UNKNOWN") + " ➤ " + _("WARN")),
+        ("uc", _("UNKNOWN") + " ➤ " + _("CRIT")),
+    ]
+
+    if flavour == "alerts":
+        choices += [("uu", _("UNKNOWN") + " ➤ " + _("UNKNOWN"))]
+
+    choices += [
+        ("?r", _("any") + " ➤ " + _("OK")),
+        ("?w", _("any") + " ➤ " + _("WARN")),
+        ("?c", _("any") + " ➤ " + _("CRIT")),
+        ("?u", _("any") + " ➤ " + _("UNKNOWN")),
+    ]
+
+    return choices + add_choices
 
 
 def sort_sites(sites: SiteConfigurations) -> List[_Tuple[SiteId, SiteConfiguration]]:
@@ -2719,6 +2753,7 @@ def _search_text_matches(
     for pattern in [
         host.name(),
         host.effective_attributes().get("ipaddress"),
+        host.effective_attributes().get("alias"),
         host.site_id(),
         get_site_config(host.site_id())["alias"],
         str(host.tag_groups()),

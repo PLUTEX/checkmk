@@ -79,7 +79,7 @@ from cmk.gui.plugins.openapi.restful_objects.type_defs import (
     SchemaParameter,
     StatusCodeInt,
 )
-from cmk.gui.plugins.openapi.utils import problem
+from cmk.gui.plugins.openapi.utils import problem, ProblemException
 from cmk.gui.watolib.activate_changes import (
     update_config_generation as activate_changes_update_config_generation,
 )
@@ -211,7 +211,30 @@ def _render_path_item(
     return response
 
 
-def _from_multi_dict(multi_dict: MultiDict) -> Dict[str, Union[List[str], str]]:
+ArgDict = dict[str, Union[str, list[str]]]
+
+
+def _filter_profile_headers(arg_dict: ArgDict) -> ArgDict:
+    """Filter the _profile variable from the query string
+
+    Args:
+        arg_dict:
+            A dict of query string arguments
+
+    Returns:
+        A new dict without the '_profile' parameter.
+
+
+    Examples:
+
+        >>> _filter_profile_headers({'foo': 'bar', '_profile': '1'})
+        {'foo': 'bar'}
+
+    """
+    return {key: value for key, value in arg_dict.items() if not key.startswith("_profile")}
+
+
+def _from_multi_dict(multi_dict: MultiDict) -> ArgDict:
     """Transform a MultiDict to a non-heterogenous dict
 
     Meaning: lists are lists and lists of lenght 1 are scalars.
@@ -621,6 +644,8 @@ class Endpoint:
         def _validating_wrapper(param: typing.Mapping[str, Any]) -> cmk_http.Response:
             # TODO: Better error messages, pointing to the location where variables are missing
 
+            self._used_permissions = set()
+
             _params = dict(param)
             del param
 
@@ -663,7 +688,9 @@ class Endpoint:
 
             try:
                 if query_schema:
-                    _params.update(query_schema().load(_from_multi_dict(request.args)))
+                    _params.update(
+                        query_schema().load(_filter_profile_headers(_from_multi_dict(request.args)))
+                    )
 
                 if header_schema:
                     _params.update(header_schema().load(request.headers))
@@ -712,6 +739,8 @@ class Endpoint:
                 response = self.func(_params)
             except ValidationError as exc:
                 response = _problem(exc, status_code=400)
+            except ProblemException as problem_exception:
+                response = problem_exception.to_problem()
 
             # We don't expect a permission to be triggered when an endpoint ran into an error.
             if response.status_code < 400:
@@ -806,11 +835,13 @@ class Endpoint:
                 except ValidationError as exc:
                     return problem(
                         status=500,
-                        title="Server was about to send an invalid response.",
-                        detail="This is an error of the implementation.",
+                        title="Mismatch between endpoint and internal data format. ",
+                        detail="This could be due to invalid or outdated configuration, or be an error of the implementation. "
+                        "Please check your *.mk files in case you have modified them by hand and run cmk-update-config. "
+                        "If the problem persists afterwards, please report a bug.",
                         ext={
                             "errors": exc.messages,
-                            "orig": data,
+                            "debug_data": {"orig": data},
                         },
                     )
 

@@ -53,6 +53,7 @@ from cmk.utils.store import PickleSerializer
 from cmk.utils.store.host_storage import (
     ABCHostsStorage,
     apply_hosts_file_to_object,
+    FolderAttributes,
     get_all_storage_readers,
     get_host_storage_loaders,
     get_hosts_file_variables,
@@ -684,7 +685,9 @@ class _PickleWATOInfoStorage(_ABCWATOInfoStorage):
         pickle_path = self._add_suffix(file_path)
         if not pickle_path.exists() or not self._file_valid(pickle_path, file_path):
             return None
-        return store.ObjectStore(pickle_path, serializer=PickleSerializer()).read_obj(default={})
+        return store.ObjectStore(
+            pickle_path, serializer=PickleSerializer[Dict[str, Any]]()
+        ).read_obj(default={})
 
     def _file_valid(self, pickle_path: Path, file_path: Path) -> bool:
         # The experimental file must not be older than the corresponding .wato
@@ -695,7 +698,9 @@ class _PickleWATOInfoStorage(_ABCWATOInfoStorage):
         return file_path.stat().st_mtime <= pickle_path.stat().st_mtime
 
     def write(self, file_path: Path, data: Dict[str, Any]) -> None:
-        pickle_store = store.ObjectStore(self._add_suffix(file_path), serializer=PickleSerializer())
+        pickle_store = store.ObjectStore(
+            self._add_suffix(file_path), serializer=PickleSerializer[Dict[str, Any]]()
+        )
         with pickle_store.locked():
             pickle_store.write_obj(data)
 
@@ -1525,7 +1530,8 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
 
     def _save_hosts_file(self):
         store.makedirs(self.filesystem_path())
-        if not self.has_hosts():
+        exposed_folder_attributes_for_base = self._folder_attributes_for_base_config()
+        if not self.has_hosts() and not exposed_folder_attributes_for_base:
             for storage in get_all_storage_readers():
                 storage.remove(Path(self.hosts_file_path_without_extension()))
             return
@@ -1640,6 +1646,7 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
             ),
             explicit_host_conf=explicit_host_conf,
             host_attributes=cleaned_hosts,
+            folder_attributes=exposed_folder_attributes_for_base,
         )
 
         storage_list: List[ABCHostsStorage] = [StandardHostsStorage()]
@@ -1654,6 +1661,18 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
                 data,
                 get_value_formatter(),
             )
+
+    def _folder_attributes_for_base_config(self) -> dict[str, FolderAttributes]:
+        # TODO:
+        # At this time, this is the only attribute there is, at it only exists in the CEE.
+        # This functionality should be moved to CEE specific code!
+        if "bake_agent_package" in self._attributes:
+            return {
+                self.path_for_rule_matching(): {
+                    "bake_agent_package": bool(self._attributes["bake_agent_package"]),
+                },
+            }
+        return {}
 
     def _get_alias_from_extra_conf(self, host_name, variables):
         aliases = self._host_extra_conf(host_name, variables["extra_host_conf"]["alias"])
@@ -1800,6 +1819,12 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
     def path_for_rule_matching(self):
         path = self.path()
         return "/wato/%s/" % path if path else "/wato/"
+
+    @staticmethod
+    def from_path_for_rule_matching(path_for_rule_matching: str) -> CREFolder:
+        if not path_for_rule_matching.startswith("/wato/"):
+            raise ValueError(path_for_rule_matching)
+        return Folder.folder(path_for_rule_matching[len("/wato/") :].rstrip("/"))
 
     def object_ref(self) -> ObjectRef:
         return ObjectRef(ObjectRefType.Folder, self.path())
@@ -2420,6 +2445,7 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
         new_subfolder = Folder(name, parent_folder=self, title=title, attributes=attributes)
         self._subfolders[name] = new_subfolder
         new_subfolder.save()
+        new_subfolder.save_hosts()
         add_change(
             "new-folder",
             _("Created new folder %s") % new_subfolder.alias_path(),
@@ -2733,7 +2759,13 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
             new_folder_text = target_folder.path() or self.root_folder().title()
             add_change(
                 "move-host",
-                _('Moved host from "%s" to "%s"') % (old_folder_text, new_folder_text),
+                _('Moved host from "%s" (ID: %s) to "%s" (ID: %s)')
+                % (
+                    old_folder_text,
+                    self._id,
+                    new_folder_text,
+                    target_folder._id,
+                ),
                 object_ref=host.object_ref(),
                 sites=affected_sites,
             )
@@ -2819,7 +2851,20 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
             subfolder._add_all_sites_to_set(site_ids)
 
     def _rewrite_hosts_file(self):
+        UNUSED_ATTRIBUTES = [
+            "snmp_v3_credentials",  # added by host diagnose page
+            "hostname",  # added by host diagnose page
+        ]
+
         self._load_hosts_on_demand()
+
+        for host in self._hosts.values():
+            for attribute in UNUSED_ATTRIBUTES:
+                logger.debug("Rewriting %s", host.name())
+                if host.attribute(attribute, None):
+                    logger.debug("Removing attribute: %s", attribute)
+                    host.remove_attribute(attribute)
+
         self.save_hosts()
 
     # .-----------------------------------------------------------------------.

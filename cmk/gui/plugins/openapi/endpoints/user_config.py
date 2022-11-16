@@ -6,7 +6,7 @@
 """Users"""
 import datetime as dt
 import time
-from typing import Any, Dict, Literal, Mapping, Optional, Sequence, Tuple, TypedDict, Union
+from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
 
 from cmk.utils.type_defs import UserId
 
@@ -26,7 +26,10 @@ from cmk.gui.plugins.openapi.restful_objects import (
 from cmk.gui.plugins.openapi.restful_objects.parameters import USERNAME
 from cmk.gui.plugins.openapi.utils import problem, ProblemException, serve_json
 from cmk.gui.type_defs import UserSpec
+from cmk.gui.watolib.custom_attributes import load_custom_attrs_from_mk_file
 from cmk.gui.watolib.users import delete_users, edit_users
+
+from .host_config import _except_keys
 
 TIMESTAMP_RANGE = Tuple[float, float]
 
@@ -112,8 +115,10 @@ def list_users(params):
         ]
     ),
 )
-def create_user(params):
-    """Create a user"""
+def create_user(params) -> Response:
+    """Create a user
+
+    You can pass custom attributes you defined directly in the top level JSON object of the request."""
     api_attrs = params["body"]
     username = api_attrs["username"]
 
@@ -203,7 +208,7 @@ def serialize_user(user_id, attributes):
         domain_type="user_config",
         identifier=user_id,
         title=attributes["fullname"],
-        extensions=_filter_keys(attributes, response_schemas.UserAttributes._declared_fields),
+        extensions=_except_keys(attributes, ["auth_option"]),
     )
 
 
@@ -294,6 +299,11 @@ def _internal_to_api_format(internal_attrs: UserSpec) -> dict[str, Any]:
             )
         }
     )
+    custom_attrs = load_custom_attrs_from_mk_file(lock=False)["user"]
+    for attr in custom_attrs:
+        if (name := attr["name"]) in internal_attrs:
+            # monkeypatch a typed dict, what can go wrong
+            api_attrs[name] = internal_attrs[name]  # type:ignore[misc]
     return api_attrs
 
 
@@ -416,6 +426,8 @@ def _update_auth_options(internal_attrs, auth_options: AuthOptions, new_user=Fal
 
             if internal_auth_attrs.get("enforce_password_change"):
                 internal_attrs["serial"] = 1
+
+        internal_attrs["connector"] = "htpasswd"
     return internal_attrs
 
 
@@ -442,6 +454,8 @@ def _auth_options_to_internal_format(
     if not auth_details:
         return internal_options
 
+    # Note: Use the htpasswd wrapper for hash_password below, so we get MKUserError if anything
+    #       goes wrong.
     if auth_details["auth_type"] == "automation":
         secret = auth_details["secret"]
         internal_options["automation_secret"] = secret
@@ -626,9 +640,3 @@ def _time_stamp_range(datetime_range: TimeRange) -> TIMESTAMP_RANGE:
         return dt.datetime.timestamp(date_time.replace(tzinfo=dt.timezone.utc))
 
     return timestamp(datetime_range["start_time"]), timestamp(datetime_range["end_time"])
-
-
-def _filter_keys(
-    dict_: Dict[str, Any], included_keys: Union[Sequence[str], Mapping[str, Any]]
-) -> Dict[str, Any]:
-    return {key: value for key, value in dict_.items() if key in included_keys}

@@ -6,6 +6,8 @@
 
 import json
 
+import pytest
+
 from tests.unit.cmk.gui.conftest import WebTestAppForCMK
 
 from cmk.utils.livestatus_helpers.testing import MockLiveStatusConnection
@@ -97,6 +99,156 @@ def test_openapi_get_bi_rule(aut_user_auth_wsgi_app: WebTestAppForCMK):
         assert required_key in rule
 
     assert rule["id"] == rule_id
+
+
+def test_openapi_bi_rule(aut_user_auth_wsgi_app: WebTestAppForCMK) -> None:
+    base = "/NO_SITE/check_mk/api/1.0"
+    rule = {
+        "id": "some_rule",
+        "pack_id": "default",
+        "nodes": [
+            {
+                "search": {"type": "empty"},
+                "action": {
+                    "type": "state_of_service",
+                    "host_regex": "$HOSTNAME$",
+                    "service_regex": "ASM|ORACLE|proc",
+                },
+            }
+        ],
+        "params": {"arguments": ["HOSTNAME", "OTHERARGUMENT"]},
+        "node_visualization": {"type": "none", "style_config": {}},
+        "properties": {
+            "title": "Applications",
+            "comment": "",
+            "docu_url": "",
+            "icon": "",
+            "state_messages": {},
+        },
+        "aggregation_function": {"type": "worst", "count": 1, "restrict_state": 2},
+        "computation_options": {"disabled": False},
+    }
+
+    # create rule
+    aut_user_auth_wsgi_app.post(
+        base + "/objects/bi_rule/some_rule",
+        headers={"Accept": "application/json"},
+        status=200,
+        content_type="application/json",
+        params=json.dumps(rule),
+    )
+
+    # create dependent rule
+    rule_dependent = rule.copy()
+    rule_dependent["id"] = "dependent"
+    rule_dependent["nodes"] = [
+        {
+            "search": {"type": "empty"},
+            "action": {"type": "call_a_rule", "rule_id": "some_rule", "params": {"arguments": []}},
+        }
+    ]
+    aut_user_auth_wsgi_app.post(
+        base + "/objects/bi_rule/dependent",
+        headers={"Accept": "application/json"},
+        status=200,
+        content_type="application/json",
+        params=json.dumps(rule_dependent),
+    )
+
+    # try delete a rule, another rule is dependent on
+    response = aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_rule/some_rule",
+        headers={"Accept": "application/json"},
+        status=409,
+    )
+    assert json.loads(response.text) == {
+        "detail": "You cannot delete this rule: it is still used by other rules.",
+        "status": 409,
+        "title": "Conflict",
+    }
+
+    # delete dependent rule
+    aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_rule/dependent",
+        headers={"Accept": "application/json"},
+        status=204,
+    )
+
+    # delete rule
+    aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_rule/some_rule",
+        headers={"Accept": "application/json"},
+        status=204,
+    )
+
+    # delete non existing rule
+    aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_rule/some_rule",
+        headers={"Accept": "application/json"},
+        status=404,
+    )
+
+
+def test_openapi_bi_aggregation(aut_user_auth_wsgi_app: WebTestAppForCMK) -> None:
+    base = "/NO_SITE/check_mk/api/1.0"
+
+    aggregation = {
+        "aggregation_visualization": {
+            "ignore_rule_styles": False,
+            "layout_id": "builtin_default",
+            "line_style": "round",
+        },
+        "comment": "",
+        "computation_options": {
+            "disabled": True,
+            "escalate_downtimes_as_warn": False,
+            "use_hard_states": False,
+        },
+        "customer": None,
+        "groups": {"names": ["Hosts"], "paths": []},
+        "id": "some_aggregation",
+        "node": {
+            "action": {
+                "params": {"arguments": ["$HOSTNAME$"]},
+                "rule_id": "host",
+                "type": "call_a_rule",
+            },
+            "search": {
+                "conditions": {
+                    "host_choice": {"type": "all_hosts"},
+                    "host_folder": "",
+                    "host_labels": {},
+                    "host_tags": {"tcp": "tcp"},
+                },
+                "refer_to": "host",
+                "type": "host_search",
+            },
+        },
+        "pack_id": "default",
+    }
+
+    # create some aggregation
+    aut_user_auth_wsgi_app.post(
+        base + "/objects/bi_aggregation/some_aggregation",
+        content_type="application/json",
+        headers={"Accept": "application/json"},
+        params=json.dumps(aggregation),
+        status=200,
+    )
+
+    # delete an aggregation
+    aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_aggregation/some_aggregation",
+        headers={"Accept": "application/json"},
+        status=204,
+    )
+
+    # delete a non existing aggregation
+    aut_user_auth_wsgi_app.delete(
+        base + "/objects/bi_aggregation/some_aggregation",
+        headers={"Accept": "application/json"},
+        status=404,
+    )
 
 
 def test_openapi_modify_bi_aggregation(aut_user_auth_wsgi_app: WebTestAppForCMK):
@@ -351,7 +503,7 @@ def test_openapi_delete_pack(aut_user_auth_wsgi_app: WebTestAppForCMK):
         "public": True,
     }
 
-    # Check invalid POST request on existing id
+    # Create new pack
     aut_user_auth_wsgi_app.post(
         base + "/objects/bi_pack/test_pack",
         content_type="application/json",
@@ -380,7 +532,6 @@ def test_openapi_delete_pack(aut_user_auth_wsgi_app: WebTestAppForCMK):
 
 def test_openapi_delete_pack_forbidden(aut_user_auth_wsgi_app: WebTestAppForCMK):
     base = "/NO_SITE/check_mk/api/1.0"
-    # Check invalid POST request on existing id
     aut_user_auth_wsgi_app.delete(
         base + "/objects/bi_pack/default",
         content_type="application/json",
@@ -389,7 +540,10 @@ def test_openapi_delete_pack_forbidden(aut_user_auth_wsgi_app: WebTestAppForCMK)
     )
 
 
-def test_get_aggregation_state_empty(aut_user_auth_wsgi_app, mock_livestatus):
+@pytest.mark.parametrize("wato_enabled", [True, False])
+def test_get_aggregation_state_empty(  # type:ignore[no-untyped-def]
+    aut_user_auth_wsgi_app, mock_livestatus, wato_enabled
+) -> None:
     base = "/NO_SITE/check_mk/api/1.0"
     postfix = "/domain-types/bi_aggregation/actions/aggregation_state/invoke"
     url = f"{base}{postfix}"
@@ -403,15 +557,19 @@ def test_get_aggregation_state_empty(aut_user_auth_wsgi_app, mock_livestatus):
     )
 
     with live():
-        _response = aut_user_auth_wsgi_app.post(
-            url,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            status=200,
-            params=json.dumps({}),
-        )
+        with aut_user_auth_wsgi_app.set_config(wato_enabled=wato_enabled):
+            _response = aut_user_auth_wsgi_app.post(
+                url,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                status=200,
+                params=json.dumps({}),
+            )
 
 
-def test_get_aggregation_state_filter_names(aut_user_auth_wsgi_app, mock_livestatus):
+@pytest.mark.parametrize("wato_enabled", [True, False])
+def test_get_aggregation_state_filter_names(  # type:ignore[no-untyped-def]
+    aut_user_auth_wsgi_app, mock_livestatus, wato_enabled
+) -> None:
     base = "/NO_SITE/check_mk/api/1.0"
     postfix = "/domain-types/bi_aggregation/actions/aggregation_state/invoke"
     url = f"{base}{postfix}"
@@ -425,9 +583,43 @@ def test_get_aggregation_state_filter_names(aut_user_auth_wsgi_app, mock_livesta
     )
 
     with live():
-        _response = aut_user_auth_wsgi_app.post(
-            url,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            status=200,
-            params=json.dumps({"filter_names": ["Host heute"]}),
-        )
+        with aut_user_auth_wsgi_app.set_config(wato_enabled=wato_enabled):
+            _response = aut_user_auth_wsgi_app.post(
+                url,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                status=200,
+                params=json.dumps({"filter_names": ["Host heute"]}),
+            )
+
+
+@pytest.mark.parametrize("wato_enabled", [True, False])
+def test_post_bi_pack_creating_contact_groups_regression(
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+    mock_livestatus: MockLiveStatusConnection,
+    wato_enabled: bool,
+) -> None:
+    base = "/NO_SITE/check_mk/api/1.0"
+    contact_group = "i_should_never_exists"
+    contact_group_url = f"{base}/objects/contact_group_config/{contact_group}"
+
+    # Make sure the contact group does not exist
+    aut_user_auth_wsgi_app.get(
+        url=contact_group_url,
+        status=404,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
+    # try to create it indirectly through posting it in a BI Pack,  unsuccessfully
+    aut_user_auth_wsgi_app.post(
+        url=f"{base}/objects/bi_pack/testpack",
+        params=json.dumps(
+            {"title": "my_cool_pack", "contact_groups": [contact_group], "public": False}
+        ),
+        status=400,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
+    # Make sure it still does not exist
+    aut_user_auth_wsgi_app.get(
+        url=contact_group_url,
+        status=404,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )

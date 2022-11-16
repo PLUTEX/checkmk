@@ -54,6 +54,7 @@ def mobile_html_head(title: str) -> None:
 
     html.link(rel="apple-touch-icon", href="themes/facelift/images/ios_logo.png")
     html.javascript_file(src="js/mobile_min.js")
+    html.set_js_csrf_token()
 
     html.close_head()
     html.open_body(class_="mobile")
@@ -461,7 +462,7 @@ def _show_command_form(datasource: ABCDataSource, rows: Rows) -> None:
 
 # FIXME: Reduce duplicate code with views.py
 def do_commands(what: str, rows: Rows) -> bool:
-    confirm_options, title, executor = views.core_command(what, rows[0], 0, len(rows),)[
+    confirm_options, title, executor = views.core_command(what, rows[0], 0, rows)[
         1:4
     ]  # just get confirm_options, title and executor
 
@@ -477,7 +478,7 @@ def do_commands(what: str, rows: Rows) -> bool:
             what,
             row,
             nr,
-            len(rows),
+            rows,
         )
         for command in nagios_commands:
             if command not in already_executed:

@@ -91,6 +91,13 @@ set_up_get_epoch() {
 # END COMMON AGENT CODE
 #
 
+set_up_grep() {
+    # https://docs.oracle.com/cd/E19683-01/816-0210/6m6nb7m89/index.html:
+    # The /usr/xpg4/bin/egrep utility is identical to /usr/xpg4/bin/grep -E
+    # (see grep(1)). Portable applications should use /usr/xpg4/bin/grep -E.
+    [ -x /usr/xpg4/bin/grep ] && grep() { "/usr/xpg4/bin/grep" "$@"; }
+}
+
 set_variable_defaults() {
     : "${MK_LIBDIR:="/usr/lib/check_mk_agent"}"
     : "${MK_CONFDIR:="/etc/check_mk"}"
@@ -273,7 +280,7 @@ preamble_5() {
 
 section_checkmk() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p8"
+    echo "Version: 2.1.0p16"
     echo "AgentOS: solaris"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: ${MK_CONFDIR}"
@@ -330,30 +337,6 @@ section_checkmk_failed_plugin() {
 #
 # END COMMON AGENT CODE
 #
-
-section_job() {
-    # Get statistics about monitored jobs. Below the job directory there
-    # is a sub directory per user that ran a job. That directory must be
-    # owned by the user so that a symlink or hardlink attack for reading
-    # arbitrary files can be avoided.
-    (
-        cd "${MK_VARDIR}"/job || return
-        echo '<<<job>>>'
-        for username in *; do
-            if [ -d "${username}" ] && cd "${username}"; then
-                count=$(su "${username}" -c "ls -1 * | wc -l")
-
-                if [ "${count}" -eq "1" ]; then
-                    filename=$(su "${username}" -c "ls -1 *")
-                    echo "==> ${filename} <=="
-                fi
-
-                su "${username}" -c "head -n1000 *"
-                cd ..
-            fi
-        done
-    )
-}
 
 section_df() {
     # Filesystem usage for UFS and VXFS
@@ -454,6 +437,7 @@ section_statgrab() {
         # <<<statgrab_mem>>> info is preferred over <<<solaris_mem>>>
         # since solaris_mem is under suspicion to be buggy.
         echo '<<<statgrab_mem>>>'
+        # shellcheck disable=SC2196
         grep -E "^(swap|mem)\." /tmp/statgrab.$$ | sed 's/ *= */ /'
 
         [ -f /tmp/statgrab.$$ ] && rm -f /tmp/statgrab.$$
@@ -546,6 +530,32 @@ section_multipathing() {
 # BEGIN COMMON AGENT CODE
 #
 
+section_job() {
+    # Get statistics about monitored jobs.
+
+    _cat_files() {
+        # read file names from stdin and write like `head -n -0 -v file`
+        while read -r file; do
+            printf "==> %s <==\n" "${file##./}"
+            cat "${file}"
+        done
+    }
+
+    (
+        cd "${MK_VARDIR}/job" 2>/dev/null || return
+        printf "<<<job>>>\n"
+        for user in *; do
+            (
+                cd "${user}" 2>/dev/null || return # return from subshell only
+                # This folder is owned (and thus writable) by the user that ran the jobs.
+                # The agent (root) must not read files that are not owned by the user.
+                # This prevents symlink or hardlink attacks.
+                find -L . -type f -user "${user}" | _cat_files
+            )
+        done
+    )
+}
+
 section_fileinfo() {
     # fileinfo check: put patterns for files into /etc/check_mk/fileinfo.cfg
     perl -e '
@@ -565,19 +575,20 @@ section_fileinfo() {
     }
     exit if ! @patterns;
 
-    print "<<<fileinfo:sep(124)>>>\n", time, "\n[[[header]]]\nname|status|size|time\n[[[content]]]\n";
-
+    my $file_stats = "";
     foreach (@patterns) {
         foreach (bsd_glob("$_")) {
             if (! -f) {
-                print "$_|missing\n" if ! -d;
+                $file_stats .= "$_|missing\n" if ! -d;
             } elsif (my @infos = stat) {
-                print "$_|ok|$infos[7]|$infos[9]\n";
+                $file_stats .= "$_|ok|$infos[7]|$infos[9]\n";
             } else {
-                print "$_|stat failed: $!\n";
+                $file_stats .= "$_|stat failed: $!\n";
             }
         }
     }
+
+    print "<<<fileinfo:sep(124)>>>\n", time, "\n[[[header]]]\nname|status|size|time\n[[[content]]]\n$file_stats";
     ' -- "${MK_CONFDIR}"
 }
 
@@ -915,6 +926,8 @@ main_setup() {
     set_up_process_commandline_arguments "$@"
 
     set_up_get_epoch
+
+    set_up_grep
 
     set_variable_defaults
 

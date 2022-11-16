@@ -9,12 +9,15 @@ This command is normally executed automatically at the end of "omd update" on
 all sites and on remote sites after receiving a snapshot and does not need to
 be called manually.
 """
+from __future__ import annotations
+
 import argparse
 import ast
 import copy
 import errno
 import gzip
 import hashlib
+import json
 import logging
 import multiprocessing
 import re
@@ -28,6 +31,7 @@ from typing import (
     Callable,
     Container,
     Dict,
+    Final,
     Iterable,
     List,
     Mapping,
@@ -43,18 +47,21 @@ import cmk.utils
 import cmk.utils.certs as certs
 import cmk.utils.debug
 import cmk.utils.log as log
+import cmk.utils.packaging
 import cmk.utils.paths
 import cmk.utils.site
 import cmk.utils.tty as tty
 from cmk.utils import password_store, version
 from cmk.utils.bi.bi_legacy_config_converter import BILegacyPacksConverter
 from cmk.utils.check_utils import maincheckify
+from cmk.utils.crypto.password_hashing import is_insecure_hash
 from cmk.utils.encryption import raw_certificates_from_file
 from cmk.utils.exceptions import MKGeneralException
 from cmk.utils.log import VERBOSE
 from cmk.utils.regex import unescape
-from cmk.utils.store import load_from_mk_file, save_mk_file
+from cmk.utils.store import load_from_mk_file, ObjectStore, save_mk_file
 from cmk.utils.type_defs import (
+    BakeryTargetFolder,
     CheckPluginName,
     ContactgroupName,
     HostName,
@@ -82,7 +89,7 @@ import cmk.gui.watolib.hosts_and_folders
 import cmk.gui.watolib.rulesets
 import cmk.gui.watolib.tags
 from cmk.gui import main_modules
-from cmk.gui.bi import BIManager
+from cmk.gui.bi import BIManager  # pylint: disable=cmk-module-layer-violation
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.log import logger as gui_logger
 from cmk.gui.plugins.dashboard.utils import (
@@ -104,6 +111,7 @@ from cmk.gui.sites import is_wato_slave_site
 from cmk.gui.userdb import load_users, save_users, Users
 from cmk.gui.utils.logged_in import SuperUserContext
 from cmk.gui.utils.script_helpers import gui_context
+from cmk.gui.utils.theme import theme_choices
 from cmk.gui.wato.mkeventd import MACROS_AND_VARS
 from cmk.gui.watolib.changes import (
     ActivateChangesWriter,
@@ -196,6 +204,59 @@ def _save_user_instances(visual_type: str, all_visuals: Dict):
         visuals.save(visual_type, all_visuals, user_id)
 
 
+UpdateActionState = MutableMapping[str, str]
+
+_UpdateStatePayload = MutableMapping[str, UpdateActionState]
+
+
+class _UpdateStateSerializer:
+    @staticmethod
+    def _assert_str(raw: str) -> str:
+        if not isinstance(raw, str):
+            raise TypeError(raw)
+        return raw
+
+    def serialize(self, data: _UpdateStatePayload) -> bytes:
+        # Make sure we write it in a strucure s.t. it can be deserialized.
+        # Rather crash upon serializing.
+        return json.dumps(
+            {
+                self._assert_str(action_name): {
+                    self._assert_str(k): self._assert_str(v) for k, v in action_value.items()
+                }
+                for action_name, action_value in data.items()
+            }
+        ).encode()
+
+    @staticmethod
+    def deserialize(raw: bytes) -> _UpdateStatePayload:
+        return {
+            str(action_name): {str(k): str(v) for k, v in raw_action_value.items()}
+            for action_name, raw_action_value in json.loads(raw.decode()).items()
+        }
+
+
+class UpdateState:
+    _BASE_NAME = "update_state.json"
+
+    def __init__(
+        self, store: ObjectStore[_UpdateStatePayload], payload: _UpdateStatePayload
+    ) -> None:
+        self.store: Final = store
+        self.payload: Final = payload
+
+    @classmethod
+    def load(cls, path: Path) -> UpdateState:
+        store = ObjectStore(path / cls._BASE_NAME, serializer=_UpdateStateSerializer())
+        return cls(store, store.read_obj(default={}))
+
+    def save(self) -> None:
+        self.store.write_obj(self.payload)
+
+    def setdefault(self, name: str) -> UpdateActionState:
+        return self.payload.setdefault(name, {})
+
+
 class UpdateConfig:
     def __init__(self, logger: logging.Logger, arguments: argparse.Namespace) -> None:
         super().__init__()
@@ -273,6 +334,10 @@ class UpdateConfig:
             (self._migrate_ldap_connections, "Migrate LDAP connections"),
             (self._rewrite_bi_configuration, "Rewrite BI Configuration"),
             (self._adjust_user_attributes, "Set version specific user attributes"),
+            (
+                self._check_password_hashes,
+                "Check for insecure password hashes, enforce password reset",
+            ),
             (self._rewrite_py2_inventory_data, "Rewriting inventory data"),
             (self._migrate_pre_2_0_audit_log, "Migrate audit log"),
             (self._sanitize_audit_log, "Sanitize audit log (Werk #13330)"),
@@ -287,6 +352,7 @@ class UpdateConfig:
             (self._update_mknotifyd, "Rewrite mknotifyd config for central site"),
             (self._transform_influxdb_connnections, "Rewriting InfluxDB connections"),
             (self._check_ec_rules, "Disabling unsafe EC rules"),
+            (self._update_bakery, "Update bakery links and settings"),
         ]
 
     def _initialize_base_environment(self) -> None:
@@ -350,9 +416,10 @@ class UpdateConfig:
         self,
         global_config: GlobalSettings,
     ) -> GlobalSettings:
-        return self._transform_global_config_values(
-            self._update_removed_global_config_vars(global_config)
-        )
+        global_config = self._update_removed_global_config_vars(global_config)
+        global_config = self._remove_unknown_themes_from_global_config(global_config)
+        global_config = self._transform_global_config_values(global_config)
+        return global_config
 
     def _update_removed_global_config_vars(
         self,
@@ -374,6 +441,20 @@ class UpdateConfig:
 
         # Delete unused settings
         global_config = filter_unknown_settings(global_config)
+
+        return global_config
+
+    def _remove_unknown_themes_from_global_config(
+        self,
+        global_config: GlobalSettings,
+    ) -> GlobalSettings:
+        """
+        User could choose the classic theme in global settings in 1.6.
+        2.0 will work with this setting but 2.1 crashes.
+        """
+        if (theme := global_config.get("ui_theme")) and theme not in dict(theme_choices()):
+            global_config.pop("ui_theme")
+
         return global_config
 
     def _transform_global_config_value(
@@ -1282,6 +1363,33 @@ class UpdateConfig:
 
         save_users(users)
 
+    def _check_password_hashes(self) -> None:
+        """If a user's password hash is not considered secure anymore (see
+        password_hashing.is_insecure_hash) make that user set a new password in their next login.
+        In a future release we will not allow such password hashes anymore -- log a warning.
+        """
+        users: Users = load_users(lock=True)
+        insecure: list[UserId] = [
+            user_id
+            for user_id in users
+            if (
+                (users[user_id].get("connector") == "htpasswd")
+                and (pw := users[user_id].get("password"))
+                and is_insecure_hash(pw)
+            )
+        ]
+
+        for user_id in insecure:
+            users[user_id]["enforce_pw_change"] = True
+
+        if insecure:
+            explanation = """Users with insecure password hashes have been found in the htpasswd file. These users will be required to change their password on their next login.
+Please ensure that the affected users log in and change their password before updating to Checkmk version 2.2. Otherwise these users will not be able to log in anymore and their passwords will need to be reset manually by an administrator (either the user configuration or via the cmk-passwd command).
+The following users are affected:"""
+            self._logger.warning(_format_warning(explanation + "\n" + "\n".join(insecure)))
+
+        save_users(users)
+
     def _rewrite_py2_inventory_data(self) -> None:
         done_path = Path(cmk.utils.paths.var_dir, "update_config")
         done_file = done_path / "py2conversion.done"
@@ -1555,7 +1663,7 @@ class UpdateConfig:
                 continue
 
             params = rule["notify_plugin"][1]
-            if "mgmt_types" in params:
+            if "mgmt_type" in params:
                 continue
 
             incident_params = {
@@ -1719,6 +1827,41 @@ class UpdateConfig:
             if f"${macro_name}$" in script_text:
                 return True
         return False
+
+    def _update_bakery(self) -> None:
+        try:
+            from cmk.base.cee.bakery.agent_bakery import baked_agents_dir
+        except ImportError:
+            return
+
+        self._rewrite_generic_agent_link(baked_agents_dir)
+        self._eneable_baking_generic_package_for_root_folder()
+
+    def _rewrite_generic_agent_link(self, agents_dir: Path) -> None:
+        try:
+            platform_dirs = list(agents_dir.iterdir())
+        except FileNotFoundError:
+            return
+
+        for d in platform_dirs:
+            if not d.is_dir():
+                continue
+            with suppress(FileNotFoundError):
+                (d / "_GENERIC").rename(d / BakeryTargetFolder("/wato/").serialize())
+
+    def _eneable_baking_generic_package_for_root_folder(self) -> None:
+        update_state = UpdateState.load(Path(cmk.utils.paths.var_dir))
+        state = update_state.setdefault("bakery")
+        state_key = "activated_main_generic_package"
+        if state.get(state_key, "False") != "False":
+            return
+
+        root_folder = cmk.gui.watolib.CREFolder.root_folder()
+        root_folder.set_attribute("bake_agent_package", True)
+        root_folder.save()
+        root_folder.save_hosts()
+        state[state_key] = "True"
+        update_state.save()
 
 
 class PasswordSanitizer:

@@ -28,7 +28,7 @@ from cmk.gui.exceptions import MKUserError
 from cmk.gui.globals import config
 from cmk.gui.groups import load_host_group_information, load_service_group_information
 from cmk.gui.i18n import _
-from cmk.gui.plugins.userdb.htpasswd import hash_password
+from cmk.gui.plugins.userdb import htpasswd
 from cmk.gui.plugins.webapi.utils import (
     add_configuration_hash,
     api_call_collection_registry,
@@ -194,22 +194,26 @@ class APICallHosts(APICallCollection):
                 "required_keys": ["hostname", "folder"],
                 "required_permissions": ["wato.manage_hosts", "wato.edit_hosts"],
                 "optional_keys": ["attributes", "nodes", "create_folders"],
+                "required_input_format": "python",
             },
             "add_hosts": {
                 "handler": self._add_hosts,
                 "required_permissions": ["wato.manage_hosts", "wato.edit_hosts"],
                 "required_keys": ["hosts"],
+                "required_input_format": "python",
             },
             "edit_host": {
                 "handler": self._edit,
                 "required_keys": ["hostname"],
                 "required_permissions": ["wato.edit_hosts"],
                 "optional_keys": ["unset_attributes", "attributes", "nodes"],
+                "required_input_format": "python",
             },
             "edit_hosts": {
                 "handler": self._edit_hosts,
                 "required_permissions": ["wato.edit_hosts"],
                 "required_keys": ["hosts"],
+                "required_input_format": "python",
             },
             "get_host": {
                 "handler": self._get,
@@ -217,6 +221,7 @@ class APICallHosts(APICallCollection):
                 "optional_keys": ["effective_attributes"],
                 "required_permissions": ["wato.see_all_folders"],
                 "locking": False,
+                "required_output_format": "python",
             },
             "delete_host": {
                 "handler": self._delete,
@@ -233,6 +238,7 @@ class APICallHosts(APICallCollection):
                 "optional_keys": ["effective_attributes"],
                 "required_permissions": ["wato.see_all_folders"],
                 "locking": False,
+                "required_output_format": "python",
             },
         }
 
@@ -586,8 +592,10 @@ class APICallUsers(APICallCollection):
         new_user_objects = {}
         for user_id, values in users_from_request.items():
             user_template = userdb.new_user_template("htpasswd")
+            # Note: Use the htpasswd wrapper for hash_password below, so we get MKUserError if
+            #       anything goes wrong.
             if "password" in values:
-                values["password"] = hash_password(values["password"])
+                values["password"] = htpasswd.hash_password(values["password"])
                 values["serial"] = 1
 
             user_template.update(values)
@@ -640,7 +648,7 @@ class APICallUsers(APICallCollection):
 
             new_password = set_attributes.get("password")
             if new_password:
-                user_attrs["password"] = hash_password(new_password)
+                user_attrs["password"] = htpasswd.hash_password(new_password)
                 user_attrs["serial"] = user_attrs.get("serial", 0) + 1
 
             edit_user_objects[user_id] = {"attributes": user_attrs, "is_new_user": False}

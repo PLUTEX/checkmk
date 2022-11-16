@@ -83,6 +83,7 @@ from cmk.gui.page_menu import (
     PageMenu,
     PageMenuDropdown,
     PageMenuEntry,
+    PageMenuLink,
     PageMenuPopup,
     PageMenuSidePopup,
     PageMenuTopic,
@@ -212,6 +213,7 @@ from cmk.gui.watolib.activate_changes import get_pending_changes_info, get_pendi
 if not cmk_version.is_raw_edition():
     from cmk.gui.cee.ntop.connector import get_cache  # pylint: disable=no-name-in-module
 
+from cmk.gui.exceptions import MKMissingDataError
 from cmk.gui.type_defs import (
     ColumnName,
     FilterName,
@@ -401,6 +403,7 @@ class View:
         self._only_sites: Optional[List[SiteId]] = None
         self._user_sorters: Optional[List[SorterSpec]] = None
         self._want_checkboxes: bool = False
+        self._warning_messages: list[str] = []
         self.process_tracking = ViewProcessTracking()
 
     @property
@@ -692,6 +695,13 @@ class View:
 
         return missing_single_infos
 
+    def add_warning_message(self, message: str) -> None:
+        self._warning_messages.append(message)
+
+    @property
+    def warning_messages(self) -> list[str]:
+        return self._warning_messages
+
 
 class DummyView(View):
     """Represents an empty view hull, not intended to be displayed
@@ -842,6 +852,9 @@ class GUIViewRenderer(ABCViewRenderer):
                 )
                 % ", ".join(sorted(missing_single_infos))
             )
+
+        for message in self.view.warning_messages:
+            html.show_warning(message)
 
         if not has_done_actions and not missing_single_infos:
             html.div("", id_="row_info")
@@ -1081,7 +1094,7 @@ class GUIViewRenderer(ABCViewRenderer):
         yield PageMenuEntry(
             title=_("This view as PDF"),
             icon_name="report",
-            item=make_simple_link(
+            item=make_external_link(
                 makeuri(
                     request,
                     [],
@@ -2352,7 +2365,10 @@ def _get_view_rows(
     with CPUTracker() as filter_rows_tracker:
         # Apply non-Livestatus filters
         for filter_ in all_active_filters:
-            rows = filter_.filter_table(view.context, rows)
+            try:
+                rows = filter_.filter_table(view.context, rows)
+            except MKMissingDataError as e:
+                view.add_warning_message(str(e))
 
     view.process_tracking.amount_unfiltered_rows = unfiltered_amount_of_rows
     view.process_tracking.amount_filtered_rows = len(rows)
@@ -3020,7 +3036,11 @@ def collect_context_links(
         view, rows, singlecontext_request_vars, mobile, visual_types
     ):
         yield _make_page_menu_entry_for_visual(
-            visual_type, visual, singlecontext_request_vars, mobile
+            visual_type,
+            visual,
+            singlecontext_request_vars,
+            mobile,
+            external_link=True,
         )
 
 
@@ -3086,13 +3106,14 @@ def _make_page_menu_entry_for_visual(
     visual: Visual,
     singlecontext_request_vars: Dict[str, str],
     mobile: bool,
+    external_link: bool = False,
 ) -> PageMenuEntry:
+    url: str = make_linked_visual_url(visual_type, visual, singlecontext_request_vars, mobile)
+    link: PageMenuLink = make_external_link(url) if external_link else make_simple_link(url)
     return PageMenuEntry(
         title=visual["title"],
         icon_name=visual.get("icon") or "trans",
-        item=make_simple_link(
-            make_linked_visual_url(visual_type, visual, singlecontext_request_vars, mobile)
-        ),
+        item=link,
         name="cb_" + visual["name"],
         is_show_more=visual.get("is_show_more", False),
     )
@@ -3177,6 +3198,9 @@ def _get_combined_graphs_entry(
 
 def _show_combined_graphs_context_button(view: View) -> bool:
     if cmk_version.is_raw_edition():
+        return False
+
+    if view.name == "service":
         return False
 
     return view.datasource.ident in ["hosts", "services", "hostsbygroup", "servicesbygroup"]
@@ -3517,7 +3541,7 @@ def _get_command_groups(info_name: InfoName) -> Dict[Type[CommandGroup], List[Co
 
 
 def core_command(
-    what: str, row: Row, row_nr: int, total_rows: int
+    what: str, row: Row, row_nr: int, action_rows: Rows
 ) -> _Tuple[Sequence[CommandSpec], List[_Tuple[str, str]], str, CommandExecutor]:
     """Examine the current HTML variables in order determine, which command the user has selected.
     The fetch ids from a data row (host name, service description, downtime/commands id) and
@@ -3553,8 +3577,8 @@ def core_command(
     for cmd_class in command_registry.values():
         cmd = cmd_class()
         if user.may(cmd.permission.name):
-            result = cmd.action(cmdtag, spec, row, row_nr, total_rows)
-            confirm_options = cmd.user_confirm_options(total_rows, cmdtag)
+            result = cmd.action(cmdtag, spec, row, row_nr, action_rows)
+            confirm_options = cmd.user_confirm_options(len(action_rows), cmdtag)
             if result:
                 executor = cmd.executor
                 commands, title = result
@@ -3592,7 +3616,7 @@ def do_actions(view: ViewSpec, what: InfoName, action_rows: Rows, backurl: str) 
         return False  # no actions done
 
     command = None
-    confirm_options, cmd_title, executor = core_command(what, action_rows[0], 0, len(action_rows),)[
+    confirm_options, cmd_title, executor = core_command(what, action_rows[0], 0, action_rows)[
         1:4
     ]  # just get confirm_options, title and executor
 
@@ -3610,7 +3634,7 @@ def do_actions(view: ViewSpec, what: InfoName, action_rows: Rows, backurl: str) 
             what,
             row,
             nr,
-            len(action_rows),
+            action_rows,
         )
         for command_entry in core_commands:
             site: Optional[str] = row.get(

@@ -9,7 +9,7 @@ This is a Check_MK Agent plugin. If configured, it will be called by the
 agent without any arguments.
 """
 
-__version__ = "2.1.0p8"
+__version__ = "2.1.0p16"
 
 import abc
 import io
@@ -716,6 +716,9 @@ class PostgresLinux(PostgresBase):
                 "(.*)bin/postgres(.*)",
                 "(.*)bin/postmaster(.*)",
                 "(.*)bin/edb-postgres(.*)",
+                "^[0-9]+ postgres (.*)",
+                "^[0-9]+ postmaster (.*)",
+                "^[0-9]+ edb-postgres (.*)",
             ]
         ]
 

@@ -1756,11 +1756,12 @@ class FilterECServiceLevelRange(Filter):
         # NOTE: We need this special case only because our construction of the
         # disjunction is broken. We should really have a Livestatus Query DSL...
         bounds: FilterHTTPVariables = context.get(self.ident, {})
-        if not any(bounds):
+        if not any(v for _k, v in bounds.items()):
             return rows
 
         lower_bound: Optional[str] = bounds.get(self.lower_bound_varname)
         upper_bound: Optional[str] = bounds.get(self.upper_bound_varname)
+
         # If user only chooses "From" or "To", use same value from the choosen
         # field for the empty field and update filter form with that value
         if not lower_bound:
@@ -1776,14 +1777,7 @@ class FilterECServiceLevelRange(Filter):
         assert lower_bound is not None
         assert upper_bound is not None
         for row in rows:
-            # Example lq output (99 = service level):
-            # host: [,4,127.0.0.1,/wato/hosts.mk,99,,,/wato/ auto-piggyback checkmk-agent ...]
-            # service: [custom_2, custom_1, 99]
-            service_level = (
-                int(row["%s_custom_variable_values" % self.info][4])
-                if self.info == "host"
-                else int(row["%s_custom_variable_values" % self.info][-1])
-            )
+            service_level = int(row["custom_variables"]["EC_SL"])
             if int(lower_bound) <= service_level <= int(upper_bound):
                 filtered_rows.append(row)
 
@@ -1794,6 +1788,10 @@ class FilterECServiceLevelRange(Filter):
             return ""
 
         return "Filter: %s_custom_variable_names >= EC_SL\n" % self.info
+
+    def columns_for_filter_table(self, context: VisualContext) -> Iterable[str]:
+        if self.ident in context:
+            yield "custom_variables"
 
 
 filter_registry.register(

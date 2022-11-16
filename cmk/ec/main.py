@@ -151,11 +151,16 @@ class SyslogFacility:
         21: "local5",
         22: "local6",
         23: "local7",
-        31: "snmptrap",  # HACK!
+        30: "logfile",  # HACK because the RFC says that facilities MUST be in the range 0-23
+        31: "snmptrap",  # everything above that is for internal use. see: https://datatracker.ietf.org/doc/html/rfc5424#section-6.2.1
     }
 
     def __init__(self, value: int) -> None:
         super().__init__()
+        if value not in self.NAMES:
+            raise ValueError(
+                f"Value must be one of the following {', '.join(str(key) for key in self.NAMES)}"
+            )
         self.value = int(value)
 
     def __repr__(self):
@@ -2800,6 +2805,8 @@ class StatusServer(ECServerThread):
         arguments = parts[1:]
         if command == "DELETE":
             self.handle_command_delete(arguments)
+        elif command == "DELETE_EVENTS_OF_HOST":
+            self.handle_command_delete_events_of_host(arguments)
         elif command == "RELOAD":
             self.handle_command_reload()
         elif command == "SHUTDOWN":
@@ -2830,8 +2837,14 @@ class StatusServer(ECServerThread):
         if len(arguments) != 2:
             raise MKClientError("Wrong number of arguments for DELETE")
         event_ids, user = arguments
-        for event_id in event_ids.split(","):
-            self._event_status.delete_event(int(event_id), user)
+        ids = {int(event_id) for event_id in event_ids.split(",")}
+        self._event_status.delete_events_by(lambda event: event["id"] in ids, user)
+
+    def handle_command_delete_events_of_host(self, arguments: list[str]) -> None:
+        if len(arguments) != 2:
+            raise MKClientError("Wrong number of arguments for DELETE_EVENTS_OF_HOST")
+        hostname, user = arguments
+        self._event_status.delete_events_by(lambda event: event["host"] == hostname, user)
 
     def handle_command_update(self, arguments: list[str]) -> None:
         event_id, user, acknowledged, comment, contact = arguments
@@ -2875,7 +2888,7 @@ class StatusServer(ECServerThread):
     def handle_command_reload(self) -> None:
         reload_configuration(
             self.settings,
-            self._logger,
+            getLogger("cmk.mkeventd"),
             self._lock_configuration,
             self._history,
             self._event_status,
@@ -3554,17 +3567,15 @@ class EventStatus:
             return found  # do event action, return found copy of event
         return False  # do not do event action
 
-    # locked with self.lock
-    def delete_event(self, event_id, user):
-        for nr, event in enumerate(self._events):
-            if event["id"] == event_id:
+    def delete_events_by(self, predicate: Callable[[Event], bool], user: str) -> None:
+        for event in self._events[:]:
+            if predicate(event):
                 event["phase"] = "closed"
                 if user:
                     event["owner"] = user
                 self._history.add(event, "DELETE", user)
-                self._remove_event_by_nr(nr)
-                return
-        raise MKClientError("No event with id %s" % event_id)
+                self.remove_event(event)
+                self._count_event_remove(event)
 
     def get_events(self):
         return self._events

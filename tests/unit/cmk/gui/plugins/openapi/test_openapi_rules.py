@@ -5,14 +5,20 @@
 # conditions defined in the file COPYING, which is part of this source code package.
 import json
 import os
+import random
+import string
 import typing
 import urllib
 
 import pytest
 import webtest  # type: ignore[import]
 
-from cmk.utils import paths
+from tests.unit.cmk.gui.conftest import WebTestAppForCMK
+
+from cmk.utils import paths, version
 from cmk.utils.store import load_mk_file
+
+from cmk.gui.exceptions import MKAuthException
 
 
 @pytest.fixture(scope="function", name="new_rule")
@@ -119,6 +125,36 @@ def test_openapi_create_rule_regression(logged_in_admin_wsgi_app):
         params=json.dumps(values),
         status=200,
     )
+
+
+def test_openapi_value_raw_is_unaltered(  # type:ignore[no-untyped-def]
+    logged_in_admin_wsgi_app,
+) -> None:
+    wsgi_app = logged_in_admin_wsgi_app
+    value_raw = "{'levels': (10.0, 5.0)}"
+    base = "/NO_SITE/check_mk/api/1.0"
+    values = {
+        "ruleset": "checkgroup_parameters:memory_percentage_used",
+        "folder": "~",
+        "properties": {
+            "disabled": False,
+        },
+        "value_raw": value_raw,
+        "conditions": {},
+    }
+    new_resp = wsgi_app.post(
+        base + "/domain-types/rule/collections/all",
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        params=json.dumps(values),
+        status=200,
+    )
+    resp = wsgi_app.get(
+        base + f"/objects/rule/{new_resp.json['id']}",
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+    resp_value = resp.json["extensions"]["value_raw"]
+    assert value_raw == resp_value
 
 
 def test_openapi_rules_href_escaped(logged_in_admin_wsgi_app):
@@ -410,6 +446,33 @@ def test_openapi_move_rule_before_specific_rule(
     assert _order_of_rules(wsgi_app, base) == ["They made me do it!", "rule2", "rule1"]
 
 
+def test_create_rule_permission_error_regression(
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+    base: str,
+    with_admin,
+):
+    user, password = with_admin
+    aut_user_auth_wsgi_app.set_authorization(("Bearer", f"{user} {password}"))
+
+    _resp = aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/rule/collections/all",
+        params=json.dumps(
+            {
+                "ruleset": "active_checks:cmk_inv",
+                "folder": "~",
+                "properties": {"disabled": False},
+                "value_raw": '{"status_data_inventory": True}',
+                "conditions": {},
+            }
+        ),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        status=200,
+    )
+
+
 def _ensure_on_folder(wsgi_app, base, _rule_id, folder):
     rule_resp = wsgi_app.get(
         base + f"/objects/rule/{_rule_id}",
@@ -451,3 +514,83 @@ def _order_of_rules(wsgi_app, base) -> list[str]:
     for rule in _resp.json["value"]:
         comments.append(rule["extensions"]["properties"]["comment"])
     return comments
+
+
+def test_user_needs_folder_permissions_to_move_rules(
+    base: str,
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+    wsgi_app: WebTestAppForCMK,
+    with_user: typing.Tuple[str, str],
+) -> None:
+    source_folder = "source"
+    dest_folder = "dest"
+    _create_folder(aut_user_auth_wsgi_app, base, source_folder)
+    _create_folder(aut_user_auth_wsgi_app, base, dest_folder)
+
+    _make_folder_inaccessible(aut_user_auth_wsgi_app, base, dest_folder)
+
+    resp = aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/rule/collections/all",
+        params=json.dumps(
+            {
+                "ruleset": "active_checks:cmk_inv",
+                "folder": "~" + source_folder,
+                "properties": {"disabled": False},
+                "value_raw": '{"status_data_inventory": True}',
+                "conditions": {},
+            }
+        ),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        status=200,
+    )
+
+    wsgi_app.set_authorization(("Bearer", " ".join(with_user)))
+    with pytest.raises(MKAuthException):
+        wsgi_app.post(
+            url=base + f"/objects/rule/{resp.json['id']}/actions/move/invoke",
+            params=json.dumps({"position": "top_of_folder", "folder": "~" + dest_folder}),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            status=401,
+        )
+
+
+def _make_folder_inaccessible(wsgi_app: WebTestAppForCMK, base: str, folder: str) -> None:
+    resp = wsgi_app.get(
+        url=base + "/objects/folder_config/~" + folder,
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+    etag = resp.headers["etag"]
+
+    nobody = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+    params = {"name": nobody, "alias": nobody}
+    if version.is_managed_edition():
+        params["customer"] = "provider"
+
+    wsgi_app.post(
+        url=base + "/domain-types/contact_group_config/collections/all",
+        params=json.dumps(params),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        status=200,
+    )
+
+    wsgi_app.put(
+        url=base + "/objects/folder_config/~" + folder,
+        params=json.dumps({"attributes": {"contactgroups": {"groups": [nobody]}}}),
+        headers={
+            "If-Match": etag,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        status=200,
+    )

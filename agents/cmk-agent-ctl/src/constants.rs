@@ -2,7 +2,7 @@
 // This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 // conditions defined in the file COPYING, which is part of this source code package.
 
-pub const VERSION: &str = "2.1.0p8";
+pub const VERSION: &str = "2.1.0p16";
 
 // CONFIGURATION
 pub const DEFAULT_PULL_PORT: u16 = 6556;
@@ -22,8 +22,6 @@ pub const LEGACY_PULL_FILE: &str = "allow-legacy-pull";
 pub const CONFIG_FILE: &str = "cmk-agent-ctl.toml";
 
 // DIRS
-#[cfg(unix)]
-pub const ETC_DIR: &str = "/etc/check_mk";
 #[cfg(windows)]
 pub const WIN_AGENT_HOME_DIR: &str = "\\checkmk\\agent";
 

@@ -6,6 +6,8 @@
 import json
 import random
 import string
+from contextlib import contextmanager
+from typing import Any, Iterator, Mapping, Union
 
 import pytest
 from freezegun import freeze_time
@@ -16,6 +18,7 @@ from tests.unit.cmk.gui.conftest import WebTestAppForCMK
 from cmk.utils import version
 from cmk.utils.type_defs import UserId
 
+from cmk.gui import userdb
 from cmk.gui.plugins.openapi.endpoints.user_config import (
     _api_to_internal_format,
     _internal_to_api_format,
@@ -23,6 +26,7 @@ from cmk.gui.plugins.openapi.endpoints.user_config import (
 )
 from cmk.gui.plugins.openapi.endpoints.utils import complement_customer
 from cmk.gui.type_defs import UserRole
+from cmk.gui.watolib.custom_attributes import save_custom_attrs_to_mk_file, update_user_custom_attrs
 from cmk.gui.watolib.userroles import clone_role, RoleID
 from cmk.gui.watolib.users import edit_users
 
@@ -172,6 +176,10 @@ def test_openapi_user_minimal_password_settings(
     assert "last_pw_change" not in extensions
     assert "password" not in extensions
 
+    user_from_db = userdb.load_user(resp.json["id"])
+    assert user_from_db["connector"]
+    assert user_from_db["connector"] == "htpasswd"
+
     edit_details = {
         "auth_option": {
             "auth_type": "automation",
@@ -194,6 +202,10 @@ def test_openapi_user_minimal_password_settings(
     assert extensions["enforce_password_change"] is True
     assert extensions["idle_timeout"]["option"] == "disable"
     assert extensions["roles"] == ["user"]
+
+    user_from_db = userdb.load_user(resp.json["id"])
+    assert user_from_db["connector"]
+    assert user_from_db["connector"] == "htpasswd"
 
 
 def test_openapi_all_users(wsgi_app, with_automation_user):
@@ -501,6 +513,7 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         "last_pw_change": 1265011200,
         "enforce_pw_change": True,
         "num_failed_logins": 0,
+        "connector": "htpasswd",
     }
 
     with freeze_time("2010-02-01 09:00:00"):
@@ -531,6 +544,7 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         "last_pw_change": 1265011200,  # no change in time from previous edit
         "enforce_pw_change": True,
         "num_failed_logins": 0,
+        "connector": "htpasswd",
     }
 
 
@@ -1032,4 +1046,102 @@ def test_openapi_new_user_with_non_existing_role(
         headers={"Accept": "application/json"},
         status=400,
         content_type="application/json",
+    )
+
+
+@contextmanager
+def custom_user_attributes_ctx(attrs: list[Mapping[str, Union[str, bool]]]) -> Iterator:
+    try:
+        save_custom_attrs_to_mk_file({"user": attrs})
+        update_user_custom_attrs()
+        yield
+    finally:
+        save_custom_attrs_to_mk_file({})
+
+
+def add_default_customer_in_managed_edition(params: dict[str, Any]) -> None:
+    if version.is_managed_edition():
+        params["customer"] = "global"
+
+
+def test_openapi_custom_attributes_of_user(
+    base: str,
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "cmk.gui.watolib.global_settings.rulebased_notifications_enabled", lambda: True
+    )
+
+    attr: Mapping[str, Union[str, bool]] = {
+        "name": "judas",
+        "title": "judas",
+        "help": "help",
+        "topic": "basic",
+        "type": "TextAscii",
+        "user_editable": True,
+    }
+
+    user = "rob_halford"
+    params = {
+        "username": user,
+        "fullname": "Mathias Kettner",
+        "interface_options": {
+            "interface_theme": "dark",
+            "sidebar_position": "left",
+            "navigation_bar_icons": "show",
+            "mega_menu_icons": "entry",
+            "show_mode": "enforce_show_more",
+        },
+        "judas": "priest",
+    }
+
+    add_default_customer_in_managed_edition(params)
+
+    with custom_user_attributes_ctx([attr]):
+        aut_user_auth_wsgi_app.post(
+            url=f"{base}/domain-types/user_config/collections/all",
+            status=200,
+            headers={"Accept": "application/json"},
+            content_type="application/json",
+            params=json.dumps(params),
+        )
+
+        resp = aut_user_auth_wsgi_app.call_method(
+            "get",
+            f"{base}/objects/user_config/{user}",
+            status=200,
+            headers={"Accept": "application/json"},
+        )
+        assert resp.json["extensions"]["judas"] == "priest"
+
+
+def test_create_user_with_non_existing_custom_attribute(
+    base: str, aut_user_auth_wsgi_app: WebTestAppForCMK, monkeypatch: MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "cmk.gui.watolib.global_settings.rulebased_notifications_enabled", lambda: True
+    )
+
+    params = {
+        "username": "cmkuser",
+        "fullname": "Mathias Kettner",
+        "interface_options": {
+            "interface_theme": "dark",
+            "sidebar_position": "left",
+            "navigation_bar_icons": "show",
+            "mega_menu_icons": "entry",
+            "show_mode": "enforce_show_more",
+        },
+        "i_do_not": "exists",
+    }
+
+    add_default_customer_in_managed_edition(params)
+
+    aut_user_auth_wsgi_app.post(
+        url=f"{base}/domain-types/user_config/collections/all",
+        status=400,
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+        params=json.dumps(params),
     )

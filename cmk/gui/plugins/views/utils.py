@@ -550,17 +550,17 @@ class Command(abc.ABC):
         raise NotImplementedError()
 
     def action(
-        self, cmdtag: str, spec: str, row: Row, row_index: int, num_rows: int
+        self, cmdtag: str, spec: str, row: Row, row_index: int, action_rows: Rows
     ) -> CommandActionResult:
-        result = self._action(cmdtag, spec, row, row_index, num_rows)
+        result = self._action(cmdtag, spec, row, row_index, action_rows)
         if result:
             commands, title = result
-            return commands, self.user_dialog_suffix(title, num_rows, cmdtag)
+            return commands, self.user_dialog_suffix(title, len(action_rows), cmdtag)
         return None
 
     @abc.abstractmethod
     def _action(
-        self, cmdtag: str, spec: str, row: Row, row_index: int, num_rows: int
+        self, cmdtag: str, spec: str, row: Row, row_index: int, action_rows: Rows
     ) -> CommandActionResult:
         raise NotImplementedError()
 
@@ -815,14 +815,9 @@ class RowTableLivestatus(RowTable):
             dynamic_columns[index] = dyn_col
             columns += dyn_col
 
-        columns = list(set(columns))
-
         datasource = view.datasource
-        merge_column = datasource.merge_by
-        if merge_column:
-            # Prevent merge column from being duplicated in the query. It needs
-            # to be at first position, see _merge_data()
-            columns = [merge_column] + [c for c in columns if c != merge_column]
+        # Prevent merge column from being duplicated in the query
+        columns = list(set(columns + ([datasource.merge_by] if datasource.merge_by else [])))
 
         # Most layouts need current state of object in order to
         # choose background color - even if no painter for state
@@ -875,8 +870,8 @@ class RowTableLivestatus(RowTable):
             datasource.auth_domain,
         )
 
-        if datasource.merge_by:
-            data = _merge_data(data, columns)
+        if merge_column := datasource.merge_by:
+            data = _merge_data(data, columns, merge_column)
 
         # convert lists-rows into dictionaries.
         # performance, but makes live much easier later.
@@ -1386,12 +1381,36 @@ def make_linked_visual_url(
         )
 
     vars_values = get_linked_visual_request_vars(visual, singlecontext_request_vars)
+    http_vars = vars_values + required_vars
+
     # For views and dashboards currently the current filter settings
     return makeuri_contextless(
         request,
-        vars_values + required_vars,
+        _replace_group_vars(http_vars) if visual_type.ident == "dashboards" else http_vars,
         filename=filename,
     )
+
+
+def _replace_group_vars(vars_: HTTPVariables) -> HTTPVariables:
+    """
+    This is only needed for VisualTypeDashboards to get the correct http vars
+    for host and service groups. Dashboards have no datasource so this is
+    not covered by the current mechanism.
+
+    Replace hostgroup and servicegroup variables with opthost_group /
+    optservice_group
+    """
+    filtered_vars: HTTPVariables = []
+    for var in vars_:
+        value = var[1]
+        if var[0] == "hostgroup":
+            filtered_vars.append(("opthost_group", value))
+            continue
+        if var[0] == "servicegroup":
+            filtered_vars.append(("optservice_group", value))
+            continue
+        filtered_vars.append(var)
+    return filtered_vars
 
 
 def translate_filters(visual):
@@ -1638,7 +1657,9 @@ def get_perfdata_nth_value(row: Row, n: int, remove_unit: bool = False) -> str:
         return str(e)
 
 
-def _merge_data(data: List[LivestatusRow], columns: List[ColumnName]) -> List[LivestatusRow]:
+def _merge_data(
+    data: List[LivestatusRow], columns: List[ColumnName], merge_column: ColumnName
+) -> List[LivestatusRow]:
     """Merge all data rows with different sites but the same value in merge_column
 
     We require that all column names are prefixed with the tablename. The column with the merge key
@@ -1670,8 +1691,9 @@ def _merge_data(data: List[LivestatusRow], columns: List[ColumnName]) -> List[Li
 
         mergefuncs.append(mergefunc)
 
+    merge_column_index = columns.index(merge_column) + 1  # first entry in row is the site
     for row in data:
-        mergekey = row[1]
+        mergekey = row[merge_column_index]
         if mergekey in merged:
             merged[mergekey] = cast(
                 LivestatusRow, [f(a, b) for f, a, b in zip(mergefuncs, merged[mergekey], row)]
@@ -2307,16 +2329,11 @@ class Cell:
                 "csv",
                 "json_export",
                 "json",
+                "python",
             ]
             if (
                 request.var("output_format") in output_formats
-                and isinstance(
-                    painter,
-                    (
-                        cmk.gui.plugins.views.painters.PainterHostLabels,
-                        cmk.gui.plugins.views.painters.PainterServiceLabels,
-                    ),
-                )
+                and isinstance(painter, Painter)
                 and isinstance(result[1], dict)
             ):
                 return result

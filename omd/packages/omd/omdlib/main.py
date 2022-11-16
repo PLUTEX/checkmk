@@ -57,7 +57,6 @@ from typing import (
 )
 
 import psutil  # type: ignore[import]
-from passlib.hash import sha256_crypt  # type: ignore[import]
 
 import omdlib
 import omdlib.backup
@@ -87,7 +86,9 @@ from omdlib.dialog import (
 from omdlib.init_scripts import call_init_scripts, check_status
 from omdlib.skel_permissions import Permissions, read_skel_permissions, skel_permissions_file_path
 from omdlib.system_apache import (
+    create_old_apache_hook,
     delete_apache_hook,
+    has_old_apache_hook_in_site,
     is_apache_hook_up_to_date,
     register_with_system_apache,
     unregister_from_system_apache,
@@ -122,6 +123,7 @@ from omdlib.version_info import VersionInfo
 import cmk.utils.log
 import cmk.utils.tty as tty
 from cmk.utils.certs import cert_dir, root_cert_path, RootCA
+from cmk.utils.crypto.password_hashing import hash_password
 from cmk.utils.exceptions import MKTerminate
 from cmk.utils.log import VERBOSE
 from cmk.utils.paths import mkbackup_lock_dir
@@ -1663,8 +1665,10 @@ def getenv(key: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def clear_environment() -> None:
-    # first remove *all* current environment variables
-    keep = ["TERM"]
+    # first remove *all* current environment variables, except:
+    # TERM
+    # CMK_CONTAINERIZED: To better detect when running inside container (e.g. used for omd update)
+    keep = ["TERM", "CMK_CONTAINERIZED"]
     for key in os.environ:
         if key not in keep:
             del os.environ[key]
@@ -1754,7 +1758,8 @@ def call_scripts(site: SiteContext, phase: str) -> None:
     if os.path.exists(path):
         putenv("OMD_ROOT", site.dir)
         putenv("OMD_SITE", site.name)
-        for f in os.listdir(path):
+        # NOTE: scripts have an order!
+        for f in sorted(os.listdir(path)):
             if f[0] == ".":
                 continue
             sys.stdout.write('Executing %s script "%s"...' % (phase, f))
@@ -2088,7 +2093,7 @@ def welcome_message(site: SiteContext, admin_password: str) -> None:
     )
     sys.stdout.write(
         "  After logging in, you can change the password for cmkadmin with "
-        "%s'htpasswd etc/htpasswd cmkadmin'%s.\n" % (tty.bold, tty.normal)
+        "%s'cmk-passwd cmkadmin'%s.\n" % (tty.bold, tty.normal)
     )
     sys.stdout.write("\n")
 
@@ -2212,6 +2217,10 @@ def finalize_site(
         if status:
             bail_out("Error in non-priviledged sub-process.")
 
+    # The config changes above, made with the site user, have to be also available for
+    # the root user, so load the site config again. Otherwise e.g. changed
+    # APACHE_TCP_PORT would not be recognized
+    site.load_config()
     register_with_system_apache(version_info, site, apache_reload)
 
 
@@ -2722,12 +2731,18 @@ def main_update(
     ):
         bail_out("Aborted.")
 
+    try:
+        hook_up_to_date = is_apache_hook_up_to_date(site)
+    except PermissionError:
+        # In case the hook can not be read, assume the hook needs to be updated
+        hook_up_to_date = False
+
     if (
-        not is_apache_hook_up_to_date(site)
+        not hook_up_to_date
         and not global_opts.force
         and not dialog_yesno(
-            "This update requires additional actions: The system apache configuration needs to be "
-            "updated.\n\n"
+            "This update requires additional actions: The system apache configuration has changed "
+            "with the new version and needs to be updated.\n\n"
             f"You will have to execute 'omd update-apache-config {site.name}' as root user.\n\n"
             "Please do it right after 'omd update' to prevent inconsistencies. Have a look at "
             "#14281 for further information.\n\n"
@@ -2779,6 +2794,13 @@ def main_update(
         from_skelroot, conflict_mode=conflict_mode, depth_first=True, exclude_if_in=to_skelroot
     ):
         _execute_update_file(relpath, site, conflict_mode, from_version, to_version, old_perms)
+
+    if has_old_apache_hook_in_site(site):
+        # The site was not yet updated from the insecure site owned apache hook. In this situation
+        # we still need to have the referenced apache-own.conf in the site. This file must not be
+        # deployed with the skel mechanism anymore. It is removed from the site later once the site
+        # is updated to the secure hook.
+        create_old_apache_hook(site)
 
     # Change symbolic link pointing to new version
     create_version_symlink(site, to_version)
@@ -4514,10 +4536,6 @@ def exec_other_omd(site: SiteContext, version: str, command: str) -> NoReturn:
 
 def random_password() -> str:
     return "".join(random.choice(string.ascii_letters + string.digits) for i in range(8))
-
-
-def hash_password(password: str) -> str:
-    return sha256_crypt.hash(password)
 
 
 def ensure_mkbackup_lock_dir_rights() -> None:

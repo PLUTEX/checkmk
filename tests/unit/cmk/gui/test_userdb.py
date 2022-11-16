@@ -18,6 +18,7 @@ from tests.testlib import is_managed_repo, on_time
 
 import cmk.utils.paths
 import cmk.utils.version
+from cmk.utils.crypto import password_hashing
 from cmk.utils.type_defs import UserId
 
 import cmk.gui.plugins.userdb.htpasswd as htpasswd
@@ -549,7 +550,7 @@ def test_check_credentials_local_user_create_htpasswd_user_ad_hoc() -> None:
     assert userdb._user_exists_according_to_profile(user_id) is False
     assert user_id not in _load_users_uncached(lock=False)
 
-    htpasswd.Htpasswd(Path(cmk.utils.paths.htpasswd_file)).save(
+    htpasswd.Htpasswd(Path(cmk.utils.paths.htpasswd_file)).save_all(
         {user_id: htpasswd.hash_password("cmk")}
     )
     # Once a user exists in the htpasswd, the GUI treats the user as existing user and will
@@ -771,19 +772,19 @@ def test_disable_two_factor_authentication(user_id: UserId) -> None:
     assert userdb.is_two_factor_login_enabled(user_id) is False
 
 
-def test_make_two_factor_backup_codes(user_id) -> None:
+def test_make_two_factor_backup_codes(user_id: UserId) -> None:
     display_codes, store_codes = userdb.make_two_factor_backup_codes()
     assert len(display_codes) == 10
     assert len(store_codes) == 10
     for index in range(10):
-        assert htpasswd.check_password(display_codes[index], store_codes[index]) is True
+        password_hashing.verify(display_codes[index], store_codes[index])
 
 
 def test_is_two_factor_backup_code_valid_no_codes(user_id) -> None:
     assert userdb.is_two_factor_backup_code_valid(user_id, "yxz") is False
 
 
-def test_is_two_factor_backup_code_valid_matches(user_id) -> None:
+def test_is_two_factor_backup_code_valid_matches(user_id: UserId) -> None:
     display_codes, store_codes = userdb.make_two_factor_backup_codes()
     credentials = userdb.load_two_factor_credentials(user_id)
     credentials["backup_codes"] = store_codes

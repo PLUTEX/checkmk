@@ -488,8 +488,7 @@ std::string ProcessFileInfoPathEntry(std::string_view entry,
     const auto file_paths = FindFilesByMask(mask);
 
     if (file_paths.empty()) {
-        // no files? place missing entry(as 1.5 Agent)!
-        return MakeFileInfoStringMissing(entry, mode);
+        return {};  // as requested by ticket CMK-11016
     }
 
     std::string out;
@@ -592,10 +591,11 @@ std::string FileInfo::generateFileList(const YAML::Node &path_array) {
 }  // namespace provider
 
 std::string FileInfo::makeBody() {
-    auto out = std::to_string(tools::SecondsSinceEpoch()) + "\n";
     auto path_array_val = GetPathArray(cfg::GetLoadedConfig());
-    return path_array_val.has_value() ? out + generateFileList(*path_array_val)
-                                      : out;
+    auto file_list = generateFileList(*path_array_val);
+    auto ref_timestamp = std::to_string(tools::SecondsSinceEpoch()) + "\n";
+    return path_array_val.has_value() ? ref_timestamp + file_list
+                                      : ref_timestamp;
 }
 
 bool FileInfo::ContainsGlobSymbols(std::string_view name) {

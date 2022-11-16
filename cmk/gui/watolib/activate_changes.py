@@ -42,6 +42,7 @@ import cmk.utils
 import cmk.utils.agent_registration as agent_registration
 import cmk.utils.daemon as daemon
 import cmk.utils.license_usage.samples as license_usage_samples
+import cmk.utils.packaging
 import cmk.utils.paths
 import cmk.utils.render as render
 import cmk.utils.store as store
@@ -142,8 +143,8 @@ def get_trial_expired_message() -> str:
     return _(
         "Sorry, but your unlimited 30-day trial of Checkmk has ended. "
         "The Checkmk Free Edition does not allow distributed setups after the 30-day trial period. "
-        "In case you want to test distributed setups, please "
-        '<a href="https://checkmk.com/contact.php?" target="_blank">contact us</a>.'
+        "In case you want to test distributed setups, please contact us at "
+        "https://checkmk.com/contact"
     )
 
 
@@ -1024,6 +1025,9 @@ class SnapshotManager:
                         site_id, snapshot_settings, snapshot_creator, self._data_collector
                     )
 
+        # 3. Allow hooks to further modify the reference data for the remote site
+        hooks.call("post-snapshot-creation", self._site_snapshot_settings)
+
 
 class ABCSnapshotDataCollector(abc.ABC):
     """Prepares files to be synchronized to the remote sites"""
@@ -1563,7 +1567,13 @@ class ActivateChangesSite(multiprocessing.Process, ActivateChanges):
             self._set_done_result(configuration_warnings)
         except Exception as e:
             self._logger.exception("error activating changes")
-            self._set_result(PHASE_DONE, _("Failed"), str(e), state=STATE_ERROR)
+            # The text of following exception will be rendered in the GUI and the error message may
+            # contain some remotely-fetched data (including HTML) so we are escaping it to avoid
+            # executing arbitrary HTML code.
+            # The escape function does not escape some simple tags used for formatting.
+            # SUP-9840
+            escaped_exception = escaping.escape_text(str(e))
+            self._set_result(PHASE_DONE, _("Failed"), escaped_exception, state=STATE_ERROR)
 
         finally:
             self._unlock_activation()
@@ -2171,6 +2181,8 @@ def _execute_post_config_sync_actions(site_id: SiteId) -> None:
         # version, the config migration logic has to be executed to make the local
         # configuration compatible with the local Checkmk version.
         if _need_to_update_config_after_sync():
+            logger.debug("Fixing up synced packages")
+            cmk.utils.packaging.pre_update_config_actions(logger)
             logger.debug("Executing cmk-update-config")
             _execute_cmk_update_config()
 

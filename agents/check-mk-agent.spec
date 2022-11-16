@@ -61,28 +61,46 @@ define __spec_install_pre %{___build_pre} &&\
 # In case of an upgrade, we must cleanup here.
 # 'preun' runs after the new scripts have been deployed
 # (too late cleanup files only deployed by the old package).
-if [ -x /var/lib/cmk-agent/scripts/super-server/setup ]; then
-    /var/lib/cmk-agent/scripts/super-server/setup cleanup
+if [ -r /var/lib/cmk-agent/scripts/super-server/setup ]; then
+    /bin/sh /var/lib/cmk-agent/scripts/super-server/setup cleanup
 fi
 
 %post
 
-/var/lib/cmk-agent/scripts/super-server/setup cleanup
-/var/lib/cmk-agent/scripts/super-server/setup deploy
+# We build the .deb package by transforming the .rpm package with alien.
+# As this script has to go to the .deb "postinstall" step, we need to specify it here, and
+# detect the call from the dpkg system by the "configure" argument.
+if [ $1 = "configure" ]; then
+    /bin/sh /var/lib/cmk-agent/scripts/super-server/setup cleanup
+    BIN_DIR="/usr/bin" /bin/sh /var/lib/cmk-agent/scripts/super-server/setup deploy
+
+    # Only create our dedicated user, if the controller is in place (and working)
+    # Otherwise we can do without the user.
+    if "/usr/bin"/cmk-agent-ctl --version >/dev/null 2>&1; then
+        BIN_DIR="/usr/bin" /bin/sh /var/lib/cmk-agent/scripts/cmk-agent-useradd.sh
+    fi
+
+    /bin/sh /var/lib/cmk-agent/scripts/super-server/setup trigger
+fi
+
+%posttrans
+
+/bin/sh /var/lib/cmk-agent/scripts/super-server/setup cleanup
+BIN_DIR="/usr/bin" /bin/sh /var/lib/cmk-agent/scripts/super-server/setup deploy
 
 # Only create our dedicated user, if the controller is in place (and working)
 # Otherwise we can do without the user.
-if cmk-agent-ctl --version >/dev/null 2>&1; then
-    /var/lib/cmk-agent/scripts/cmk-agent-useradd.sh
+if "/usr/bin"/cmk-agent-ctl --version >/dev/null 2>&1; then
+    BIN_DIR="/usr/bin" /bin/sh /var/lib/cmk-agent/scripts/cmk-agent-useradd.sh
 fi
 
-/var/lib/cmk-agent/scripts/super-server/setup trigger
+/bin/sh /var/lib/cmk-agent/scripts/super-server/setup trigger
 
 %preun
 
 case "$1" in
     0|remove|purge)
-        /var/lib/cmk-agent/scripts/super-server/setup cleanup
-        /var/lib/cmk-agent/scripts/super-server/setup trigger
+        /bin/sh /var/lib/cmk-agent/scripts/super-server/setup cleanup
+        /bin/sh /var/lib/cmk-agent/scripts/super-server/setup trigger
     ;;
 esac

@@ -480,6 +480,7 @@ class _CombinedVisualsCache:
 
 
 hooks.register_builtin("snapshot-pushed", _CombinedVisualsCache.invalidate_all_caches)
+hooks.register_builtin("snapshot-pushed", store.clear_pickled_object_files)
 hooks.register_builtin("users-saved", lambda x: _CombinedVisualsCache.invalidate_all_caches())
 
 
@@ -514,7 +515,9 @@ def _load_custom_user_visuals(
                 continue
 
             visuals.update(
-                load_visuals_of_a_user(what, builtin_visuals, skip_func, visual_path, user_id)
+                load_visuals_of_a_user(
+                    what, builtin_visuals, skip_func, Path(visual_path), UserId(user_id)
+                )
             )
 
         except SyntaxError as e:
@@ -523,9 +526,11 @@ def _load_custom_user_visuals(
     return visuals
 
 
-def load_visuals_of_a_user(what, builtin_visuals, skip_func, path, user_id) -> CustomUserVisuals:
+def load_visuals_of_a_user(
+    what, builtin_visuals, skip_func, path: Path, user_id: UserId
+) -> CustomUserVisuals:
     user_visuals: CustomUserVisuals = {}
-    for name, visual in store.load_object_from_file(path, default={}).items():
+    for name, visual in store.load_pickled_object_file(path, default={}).items():
         visual["owner"] = user_id
         visual["name"] = name
 
@@ -564,11 +569,12 @@ def declare_visual_permission(what, name, visual):
 
 
 # Load all users visuals just in order to declare permissions of custom visuals
+# TODO: Use regular load logic here, e.g. _load_custom_user_visuals()
 def declare_custom_permissions(what):
     for dirpath in cmk.utils.paths.profile_dir.iterdir():
         try:
             if dirpath.is_dir():
-                path = dirpath.joinpath("%s.mk" % what)
+                path = dirpath.joinpath("user_%s.mk" % what)
                 if not path.exists():
                     continue
                 visuals = store.load_object_from_file(path, default={})
@@ -828,7 +834,11 @@ def page_list(
                         [(visual_type_registry[what]().ident_attr, visual_name), ("owner", owner)],
                         filename="%s.py" % what_s,
                     )
-                    html.a(title2, href=show_url)
+                    html.a(
+                        title2,
+                        href=show_url,
+                        target="_blank" if what_s == "report" else None,
+                    )
                 else:
                     html.write_text(title2)
                 html.help(_u(visual["description"]))
@@ -2274,7 +2284,7 @@ def may_add_site_hint(
 
     # Hack for servicedesc view which is meant to show all services with the given
     # description: Don't add the site filter for this view.
-    if visual_name in ["servicedesc", "servicedescpnp"]:
+    if visual_name == "servicedesc":
         return False
 
     return True
