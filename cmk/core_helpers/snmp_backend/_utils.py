@@ -34,7 +34,7 @@ def _is_hex_string(value: str) -> bool:
     n = 0
     for x in value:
         if n % 3 == 2:
-            if x != " " and x != "\n":
+            if x != " ":
                 return False
         else:
             if x not in hexdigits:
