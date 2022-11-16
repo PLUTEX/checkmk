@@ -57,8 +57,7 @@ register.snmp_section(
 
 def discovery_ups(section: Section) -> DiscoveryResult:
     for key, ups in section.items():
-        if ups.voltage:
-            yield Service(item=key)
+        yield Service(item=key)
 
 
 def check_ups_out_load(item: str, params: Mapping[str, Any], section: Section) -> CheckResult:
