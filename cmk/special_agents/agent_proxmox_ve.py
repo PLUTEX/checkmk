@@ -474,6 +474,7 @@ def agent_proxmox_ve_main(args: Args) -> int:
                             "subscription": {},
                             # for now just get basic task data - we'll read the logs later
                             "tasks": [],
+                            "replication": [],
                             "qemu": [
                                 {
                                     "{vmid}": {
@@ -612,6 +613,8 @@ def agent_proxmox_ve_main(args: Args) -> int:
                 writer.append_json(task for task in node["tasks"] if task["type"] == "vzdump")
             with SectionWriter("proxmox_ve_node_storages") as writer:
                 writer.append_json(storage for storage in node["storage"])
+            with SectionWriter("proxmox_ve_node_replication") as writer:
+                writer.append_json(node["replication"])
 
     for vmid, vm in all_vms.items():
         with ConditionalPiggybackSection(vm["name"]):
