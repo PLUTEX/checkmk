@@ -232,6 +232,8 @@ def diskstat_extract_name_info(
             phase = "dmsetup_info"
         elif line[0] == "[vx_dsk]":
             phase = "vx_dsk"
+        elif line[0] == "[lnx_path]":
+            phase = "lnx_path"
         else:
             if phase == "info":
                 if len(line) == 1:
@@ -253,6 +255,11 @@ def diskstat_extract_name_info(
                 minor = int(line[1], 16)
                 group, disk = line[2].split("/")[-2:]
                 name = "VxVM %s-%s" % (group, disk)
+                name_info[major, minor] = name
+            elif phase == "lnx_path":
+                major = int(line[0], 16)
+                minor = int(line[1], 16)
+                name = line[2].split("/")[-1]
                 name_info[major, minor] = name
     return timestamp, info_plain, name_info
 
