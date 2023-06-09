@@ -579,8 +579,8 @@ def agent_proxmox_ve_main(args: Args) -> None:
                 writer.append_json(
                     {
                         "status": node["status"],
-                        "lxc": [vmid for vmid in all_vms if all_vms[vmid]["type"] == "lxc"],
-                        "qemu": [vmid for vmid in all_vms if all_vms[vmid]["type"] == "qemu"],
+                        "lxc": node["lxc"],
+                        "qemu": node["qemu"],
                         "proxmox_ve_version": node["version"],
                         "time_info": node["time"],
                         "subscription": {
@@ -627,7 +627,7 @@ def agent_proxmox_ve_main(args: Args) -> None:
                         "type": vm["type"],
                         "status": vm["status"],
                         "name": vm["name"],
-                        "config": config_data[vmid]
+                        "config": config_data.get(vmid),
                     }
                 )
             if vm["type"] != "qemu":
