@@ -4,7 +4,7 @@ include $(REPO_PATH)/defines.make
 PYTHON := Python
 PYTHON_DIR := Python-$(PYTHON_VERSION)
 # Increase this to enforce a recreation of the build cache
-PYTHON_BUILD_ID := 11
+PYTHON_BUILD_ID := 3
 
 PYTHON_UNPACK := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-unpack
 PYTHON_BUILD := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-build
@@ -12,6 +12,7 @@ PYTHON_COMPILE := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-compile
 PYTHON_INTERMEDIATE_INSTALL := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-install-intermediate
 PYTHON_CACHE_PKG_PROCESS := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-cache-pkg-process
 PYTHON_INSTALL := $(BUILD_HELPER_DIR)/$(PYTHON_DIR)-install
+PYTHON_SYSCONFIGDATA := _sysconfigdata__linux_x86_64-linux-gnu.py
 
 PYTHON_INSTALL_DIR := $(INTERMEDIATE_INSTALL_BASE)/$(PYTHON_DIR)
 PYTHON_BUILD_DIR := $(PACKAGE_BUILD_DIR)/$(PYTHON_DIR)
@@ -25,12 +26,15 @@ PACKAGE_PYTHON_LD_LIBRARY_PATH := $(PACKAGE_PYTHON_DESTDIR)/lib
 PACKAGE_PYTHON_INCLUDE_PATH    := $(PACKAGE_PYTHON_DESTDIR)/include/python$(PYTHON_MAJOR_DOT_MINOR)
 PACKAGE_PYTHON_BIN             := $(PACKAGE_PYTHON_DESTDIR)/bin
 PACKAGE_PYTHON_EXECUTABLE      := $(PACKAGE_PYTHON_BIN)/python3
+PACKAGE_PYTHON_SYSCONFIGDATA := $(PACKAGE_PYTHON_PYTHONPATH)/$(PYTHON_SYSCONFIGDATA)
 
 # HACK!
 PYTHON_PACKAGE_DIR := $(PACKAGE_DIR)/$(PYTHON)
 PYTHON_SITECUSTOMIZE_SOURCE := $(PYTHON_PACKAGE_DIR)/sitecustomize.py
 PYTHON_SITECUSTOMIZE_WORK := $(PYTHON_WORK_DIR)/sitecustomize.py
 PYTHON_SITECUSTOMIZE_COMPILED := $(PYTHON_WORK_DIR)/__pycache__/sitecustomize.cpython-$(PYTHON_MAJOR_MINOR).pyc
+PYTHON_PIP_WRAPPER_SOURCE := $(PYTHON_PACKAGE_DIR)/pip
+PYTHON_PREFIX := /replace-me
 
 .NOTPARALLEL: $(PYTHON_INSTALL)
 
@@ -55,11 +59,11 @@ $(PYTHON_CACHE_PKG_PROCESS): $(PYTHON_CACHE_PKG_PATH)
            patchelf --set-rpath "$(OMD_ROOT)/lib" $$i; \
 	done
 # Native modules built based on this version need to use the correct rpath
-	sed -i 's|--rpath,/omd/versions/[^/]*/lib|--rpath,$(OMD_ROOT)/lib|g' \
-	    $(PACKAGE_PYTHON_PYTHONPATH)/_sysconfigdata__linux_x86_64-linux-gnu.py
+	$(SED) -i 's|--rpath,/omd/versions/[^/]*/lib|--rpath,$(OMD_ROOT)/lib|g' $(PACKAGE_PYTHON_SYSCONFIGDATA)
+	$(SED) -i "s|$(PYTHON_PREFIX)|$(PACKAGE_PYTHON_DESTDIR)|g" $(PACKAGE_PYTHON_SYSCONFIGDATA)
 	LD_LIBRARY_PATH="$(PACKAGE_PYTHON_LD_LIBRARY_PATH)" \
 	    $(PACKAGE_PYTHON_EXECUTABLE) -m py_compile \
-	    $(PACKAGE_PYTHON_PYTHONPATH)/_sysconfigdata__linux_x86_64-linux-gnu.py
+	    $(PACKAGE_PYTHON_SYSCONFIGDATA)
 	if [ -d "$(PACKAGE_PYTHON_PYTHONPATH)/test" ] ; then \
 	    $(RM) -r $(PACKAGE_PYTHON_PYTHONPATH)/test ; \
 	fi
@@ -78,7 +82,7 @@ $(PYTHON_COMPILE): $(PYTHON_UNPACK) $(OPENSSL_CACHE_PKG_PROCESS)
 	$(TEST) "$(DISTRO_NAME)" = "SLES" && sed -i 's,#include <panel.h>,#include <ncurses/panel.h>,' Modules/_curses_panel.c ; \
 	LD_LIBRARY_PATH="$(PACKAGE_OPENSSL_LD_LIBRARY_PATH)" \
 	    ./configure \
-	        --prefix="" \
+	        --prefix=$(PYTHON_PREFIX) \
 	        --enable-shared \
 	        --with-ensurepip=install \
 	        --with-openssl=$(PACKAGE_OPENSSL_DESTDIR) \
@@ -99,14 +103,28 @@ $(PYTHON_INTERMEDIATE_INSTALL): $(PYTHON_BUILD)
 # python-modules, ...) during compilation and install targets.
 # NOTE: -j1 seems to be necessary when --enable-optimizations is used
 	$(MAKE) -j1 -C $(PYTHON_BUILD_DIR) DESTDIR=$(PYTHON_INSTALL_DIR) install
-# Fix python interpreter
-	$(SED) -i '1s|^#!.*/python'$(PYTHON_VERSION_MAJOR)'\.'$(PYTHON_VERSION_MINOR)'$$|#!/usr/bin/env python'$(PYTHON_VERSION_MAJOR)'|' $(addprefix $(PYTHON_INSTALL_DIR)/bin/,2to3-$(PYTHON_MAJOR_DOT_MINOR) idle$(PYTHON_MAJOR_DOT_MINOR) pip3 pip$(PYTHON_MAJOR_DOT_MINOR) pydoc$(PYTHON_MAJOR_DOT_MINOR))
-# Fix pip3 configuration
-	$(SED) -i '/^import re$$/i import os\nos.environ["PIP_DISABLE_PIP_VERSION_CHECK"] = "True"\nos.environ["PIP_TARGET"] = os.path.join(os.environ["OMD_ROOT"], "local/lib/python$(PYTHON_VERSION_MAJOR)")' $(addprefix $(PYTHON_INSTALL_DIR)/bin/,pip$(PYTHON_VERSION_MAJOR) pip$(PYTHON_MAJOR_DOT_MINOR))
+# As we're now setting the prefix during ./configure, we need to clean up here the folder structure to get
+# the same one as before.
+	$(RSYNC) $(PYTHON_INSTALL_DIR)$(PYTHON_PREFIX)/* $(PYTHON_INSTALL_DIR)
+	rm -r $(PYTHON_INSTALL_DIR)$(PYTHON_PREFIX)
+# Fix shebang of scripts
+	$(SED) -i '1s|^#!'$(PYTHON_PREFIX)'.*|#!/usr/bin/env python'$(PYTHON_VERSION_MAJOR)'|' $(addprefix $(PYTHON_INSTALL_DIR)/bin/,2to3-$(PYTHON_MAJOR_DOT_MINOR) idle$(PYTHON_MAJOR_DOT_MINOR) pip$(PYTHON_VERSION_MAJOR) pip$(PYTHON_MAJOR_DOT_MINOR) pydoc$(PYTHON_MAJOR_DOT_MINOR))
+# Fix pip3 configuration by using own wrapper script
+# * PIP_TARGET currently has an issue when installing non-wheel packages, see https://github.com/pypa/pip/issues/8438
+# * The workaround is to set the target via the commandline
+# * The wrapper script we're using is based on what PipScriptMaker would create, see:
+# https://github.com/pypa/pip/blob/83c800d3b8b367b6ae1fbf92fd4f699612cecfc7/src/pip/_internal/operations/install/wheel.py#L422
+# * However, we may run into issues in the future again. It seems actually the module invocation (python -m pip) is more solid, see:
+# https://github.com/pypa/pip/issues/5599
+	install -m 755 --no-target-directory $(PYTHON_PIP_WRAPPER_SOURCE) $(PYTHON_INSTALL_DIR)/bin/pip$(PYTHON_VERSION_MAJOR)
+	install -m 755 --no-target-directory $(PYTHON_PIP_WRAPPER_SOURCE) $(PYTHON_INSTALL_DIR)/bin/pip$(PYTHON_MAJOR_DOT_MINOR)
 	install -m 644 $(PYTHON_SITECUSTOMIZE_SOURCE) $(PYTHON_INSTALL_DIR)/lib/python$(PYTHON_MAJOR_DOT_MINOR)/
 	install -m 644 $(PYTHON_SITECUSTOMIZE_COMPILED) $(PYTHON_INSTALL_DIR)/lib/python$(PYTHON_MAJOR_DOT_MINOR)/__pycache__
 	$(TOUCH) $@
 
 $(PYTHON_INSTALL): $(PYTHON_CACHE_PKG_PROCESS)
 	$(RSYNC) $(PYTHON_INSTALL_DIR)/ $(DESTDIR)$(OMD_ROOT)/
+	# Patch for the final destination
+	# TODO: It seems $(DESTDIR) is only defined in this target, so it cannot be used outside of this target?
+	$(SED) -i "s|$(PACKAGE_PYTHON_DESTDIR)|$(OMD_ROOT)|g" $(DESTDIR)/$(OMD_ROOT)/lib/python$(PYTHON_MAJOR_DOT_MINOR)/$(PYTHON_SYSCONFIGDATA)
 	$(TOUCH) $@

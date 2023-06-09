@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -102,7 +102,12 @@ def check_postgres_stat_database_size(item, _no_params, parsed):
 
     stats = parsed[item]
     size = stats["datsize"]
-    return (0, "Size is %s" % get_bytes_human_readable(size), [("size", size)])
+
+    if size in ["", None]:
+        yield (1, "Database size is not available.")
+        return
+
+    yield (0, "Size is %s" % get_bytes_human_readable(size), [("size", size)])
 
 
 check_info["postgres_stat_database.size"] = {

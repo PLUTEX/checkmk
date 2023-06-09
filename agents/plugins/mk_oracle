@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -9,7 +9,7 @@
 
 # Disable unused variable error (needed to keep track of version)
 # shellcheck disable=SC2034
-CMK_VERSION="2.1.0p16"
+CMK_VERSION="2.1.0p29"
 
 # Checkmk agent plugin for monitoring ORACLE databases
 # This plugin is a result of the common work of Thorsten Bruhns
@@ -635,15 +635,23 @@ set_ora_env() {
 
 set_ora_version() {
     if [ "$MK_ORA_TESTVERSION" ]; then
-        ORACLE_VERSION="$MK_ORA_TESTVERSION"
-        logging -o -e "[${sid}] [set_ora_version]" "Custom ORACLE_VERSION: ${ORACLE_VERSION}"
+        # TODO: How is MK_ORA_TESTVERSION used? How many digits does it have?
+        ORACLE_VERSION_FOUR_PARTS="$MK_ORA_TESTVERSION"
+        logging -o -e "[${sid}] [set_ora_version]" "Custom ORACLE_VERSION: ${ORACLE_VERSION_SHORT}"
+    elif [ "$1" ]; then
+        # Used for REMOTE_INSTANCES
+        ORACLE_VERSION_FOUR_PARTS="$1"
     else
-        ORACLE_VERSION="$1"
+        # Get the sql version by call sqlplus
+        ORACLE_VERSION_FOUR_PARTS="$(get_sqlplus_version_with_precision 4)"
     fi
 
-    NUMERIC_ORACLE_VERSION=${ORACLE_VERSION//./}
-    export NUMERIC_ORACLE_VERSION
+    ORACLE_VERSION_SHORT=$(echo "${ORACLE_VERSION_FOUR_PARTS}" | cut -d"." -f-2)
 
+    NUMERIC_ORACLE_VERSION=${ORACLE_VERSION_SHORT//./}
+    NUMERIC_ORACLE_VERSION_FOUR_PARTS=${ORACLE_VERSION_FOUR_PARTS//./}
+    export NUMERIC_ORACLE_VERSION
+    export NUMERIC_ORACLE_VERSION_FOUR_PARTS
 }
 
 # .
@@ -1721,7 +1729,10 @@ sql_instance() {
                      || '|' || i.instance_name
                 from v\$instance i;"
 
-    elif [ "$NUMERIC_ORACLE_VERSION" -ge 121 ]; then
+    # The next query is special: recovery_status is only available from 12.1.0.2 on, that's why we need
+    # a higher precision oracle version
+    # https://docs.oracle.com/database/121/REFRN/GUID-A399F608-36C8-4DF0-9A13-CEE25637653E.htm#REFRN30652
+    elif [ "$NUMERIC_ORACLE_VERSION_FOUR_PARTS" -ge 12102 ]; then
         echo "select upper(instance_name)
                          || '|' || version
                          || '|' || status
@@ -2295,6 +2306,11 @@ handle_custom_sql_errors() {
 #   |                                |_|                                   |
 #   '----------------------------------------------------------------------'
 
+get_sqlplus_version_with_precision() {
+    precision="$1"
+    "${ORACLE_HOME}"/bin/sqlplus -V | "${GREP}" ^SQL | cut -d" " -f3 | cut -d"." -f-"${precision}"
+}
+
 print_dummy_sections() {
     for section in $SYNC_SECTIONS $ASYNC_SECTIONS $SYNC_ASM_SECTIONS $ASYNC_ASM_SECTIONS; do
         echo "<<<oracle_${section}>>>"
@@ -2488,8 +2504,6 @@ mk_ora_db_connect() {
 
     else
         # working with locally running instances
-        # mk_oracle_dbusers.conf is for compatibility. Do not use it anymore
-        ORACLE_USERCONF=${MK_CONFDIR}/mk_oracle_dbuser.conf
         TNSALIAS=${ORACLE_SID}
 
         # ASM use '+' as 1st character in SID!
@@ -2519,13 +2533,6 @@ mk_ora_db_connect() {
             else
                 ORACFGLINE=${!dummy_upper}
             fi
-        fi
-
-        if [ -f "${ORACLE_USERCONF}" ] && [ "${ORACFGLINE}" = '' ]; then
-            # mk_oracle_dbuser.conf
-            ORACFGLINE=$("${GREP}" "^${ORACLE_SID}:" <"${ORACLE_USERCONF}")
-            # mk_oracle_dbuser has ORACLE_SID as 1. parameter. we need an offset for all values
-            offset=1
         fi
 
         CFGTNSALIAS=$(echo "${ORACFGLINE}" | cut -d":" -f$((6 + offset)))
@@ -2562,7 +2569,6 @@ mk_ora_db_connect() {
         logging "[${sid}] [mk_ora_db_connect]" "TNS CFGTNSALIAS: $CFGTNSALIAS"
     fi
 
-    TNSPINGOK=no
     if [ -f "${TNS_ADMIN}/tnsnames.ora" ]; then
         if [ "${ORADBUSER:0:2}" = '/@' ]; then
             P_TNSALIAS_P=$(eval echo "${ORADBUSER:2}")
@@ -2596,14 +2602,6 @@ mk_ora_db_connect() {
         fi
 
         TNSALIAS=${SQLS_TNSALIAS:-${P_TNSALIAS_P}}
-
-        logging "[${sid}] [mk_ora_db_connect]" "TNS Alias PING: $TNSALIAS"
-
-        if "${ORACLE_HOME}"/bin/tnsping "$TNSALIAS" >/dev/null 2>&1; then
-            TNSPINGOK=yes
-        else
-            unset TNSALIAS
-        fi
     else
         if [ -z "$CFGTNSALIAS" ]; then
             unset TNSALIAS
@@ -2617,8 +2615,7 @@ mk_ora_db_connect() {
         "DB sys connect : $DBSYSCONNECT" \
         "DB host        : $DBHOST" \
         "DB port        : $DBPORT" \
-        "TNS alias      : $TNSALIAS" \
-        "TNS PING       : ${TNSPINGOK}"
+        "TNS alias      : $TNSALIAS"
 
     if [ ! "${ORACFGLINE}" ]; then
         # no configuration found
@@ -2636,7 +2633,7 @@ mk_ora_db_connect() {
             # connect with / and wallet
             ORADBUSER=""
             DBPASSWORD=""
-            if [ -z "$CFGTNSALIAS" ] && [ "$TNSPINGOK" = 'no' ]; then
+            if [ -z "$CFGTNSALIAS" ]; then
                 # create an EZCONNECT string when no tnsnames.ora is usable
                 # or no alias is configured in CFGTNSALIAS
                 # defaults to localhost:1521/<ORACLE_SID>
@@ -2888,13 +2885,14 @@ execute_queries_for_sid() {
         return
     fi
 
-    set_ora_version "$("${ORACLE_HOME}"/bin/sqlplus -V | "${GREP}" ^SQL | cut -d" " -f3 | cut -d"." -f-2)"
+    set_ora_version
     logging "[${sid}] [local]" \
         "ORACLE_SID      : ${ORACLE_SID}" \
         "ORACLE_HOME     : ${ORACLE_HOME}" \
         "TNS_ADMIN       : ${TNS_ADMIN}" \
         "LD_LIBRARY_PATH : ${LD_LIBRARY_PATH}" \
-        "ORACLE_VERSION  : ${ORACLE_VERSION} (${NUMERIC_ORACLE_VERSION})"
+        "ORACLE_VERSION  : ${ORACLE_VERSION} (${NUMERIC_ORACLE_VERSION})" \
+        "ORACLE_VERSION_FOUR_PARTS  : ${NUMERIC_ORACLE_VERSION_FOUR_PARTS}"
 
     # MK_SID is feauture replacement for sid
     export MK_SID=$sid
@@ -2932,7 +2930,7 @@ export -f do_async_custom_sqls
 export -f handle_custom_sql_errors
 
 set_up_tmpdirs() {
-    ORA_TMPDIR="${MK_VARDIR}/tmp/mk_oracle"
+    ORA_TMPDIR="${MK_VARDIR}/tmp/mk_oracle_tmp_dir"
     ORA_TASKS_TMPDIR="${ORA_TMPDIR}/tasks"
     mkdir -p "$ORA_TASKS_TMPDIR"
 }
@@ -3075,7 +3073,7 @@ main_queries() {
 main() {
     # See werk 13732 for more details about this main function
 
-    parent_dir=$(basename "$(pwd)")
+    parent_dir=$(basename "$(dirname "$0")")
 
     if $MK_ORA_ON_CL || [ "$parent_dir" = plugins ]; then
         # Does not work properly (async sections) on distros

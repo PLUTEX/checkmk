@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 // conditions defined in the file COPYING, which is part of this source code package.
 
@@ -523,7 +523,10 @@ export function switch_customer(customer_id, switch_state) {
 }
 
 export function switch_site(url) {
-    ajax.get_url(url, utils.reload_whole_page, null);
+    ajax.call_ajax(url, {
+        method: "POST",
+        response_handler: utils.reload_whole_page,
+    });
 }
 
 function bulk_update_contents(ids, codes) {
@@ -860,7 +863,7 @@ export function fetch_nagvis_snapin_contents() {
  * Bookmark snapin
  *************************************************/
 
-export function add_bookmark(trans_id = null) {
+export function add_bookmark() {
     const url = parent.frames[0].location;
     const title = parent.frames[0].document.title;
     ajax.call_ajax("add_bookmark.py", {
@@ -868,13 +871,7 @@ export function add_bookmark(trans_id = null) {
         response_handler: utils.update_contents,
         handler_data: "snapin_bookmarks",
         method: "POST",
-        post_data:
-            "title=" +
-            encodeURIComponent(title) +
-            "&url=" +
-            encodeURIComponent(url) +
-            "&_transid=" +
-            encodeURIComponent(trans_id),
+        post_data: "title=" + encodeURIComponent(title) + "&url=" + encodeURIComponent(url),
     });
 }
 

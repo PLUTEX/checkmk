@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Managing configuration activation of Checkmk
@@ -76,9 +76,15 @@ from cmk.gui.plugins.watolib.utils import (
     SerializedSettings,
     wato_fileheader,
 )
-from cmk.gui.sites import activation_sites, allsites
+from cmk.gui.sites import activation_sites
 from cmk.gui.sites import disconnect as sites_disconnect
-from cmk.gui.sites import get_site_config, is_single_local_site, site_is_local, SiteStatus
+from cmk.gui.sites import (
+    get_enabled_sites,
+    get_site_config,
+    is_single_local_site,
+    site_is_local,
+    SiteStatus,
+)
 from cmk.gui.sites import states as sites_states
 from cmk.gui.type_defs import ConfigDomainName, HTTPVariables
 from cmk.gui.utils.ntop import is_ntop_configured
@@ -289,9 +295,10 @@ def get_replication_paths() -> List[ReplicationPath]:
                 "customer_multisite",
                 "customer_check_mk",
                 "customer_gui_design",
-                "gui_logo",
-                "gui_logo_facelift",
-                "gui_logo_dark",
+                "login_logo_facelift",
+                "login_logo_dark",
+                "navbar_logo_facelift",
+                "navbar_logo_dark",
             }
         ]
 
@@ -746,8 +753,9 @@ class ActivateChangesManager(ActivateChanges):
         return "%s/%s/info.mk" % (self.activation_tmp_base_dir, activation_id)
 
     def activations(self):
-        for activation_id in os.listdir(self.activation_tmp_base_dir):
-            yield activation_id, self._load_activation_info(activation_id)
+        if os.path.exists(self.activation_tmp_base_dir):
+            for activation_id in os.listdir(self.activation_tmp_base_dir):
+                yield activation_id, self._load_activation_info(activation_id)
 
     def _site_snapshot_file(self, site_id):
         return "%s/%s/site_%s_sync.tar.gz" % (
@@ -1117,9 +1125,23 @@ class CRESnapshotDataCollector(ABCSnapshotDataCollector):
         if os.path.exists(snapshot_settings.work_dir):
             shutil.rmtree(snapshot_settings.work_dir)
 
-        for component in snapshot_settings.snapshot_components:
-            if component.ident == "sitespecific":
-                continue  # Will be created for each site individually later
+        for component in self.get_generic_components():
+            # Generic components (i.e. any component that does not have "ident"
+            # = "sitespecific") are collected to be snapshotted. Site-specific
+            # components as well as distributed wato components are done later on
+            # in the process.
+
+            # Note that at this stage, components that have been deselected
+            # from site synchronisation by the user must not be pre-filtered,
+            # otherwise these settings would cascade randomly from the first site
+            # to the other sites.
+
+            # These components are deselected in the snapshot settings of the
+            # site, which is the basis of the actual synchronisation.
+
+            # Examples of components that can be excluded:
+            # - event console ("mkeventd", "mkeventd_mkp")
+            # - MKPs ("local", "mkps")
 
             source_path = cmk.utils.paths.omd_root / component.site_path
             target_path = Path(snapshot_settings.work_dir).joinpath(component.site_path)
@@ -1783,7 +1805,6 @@ class ActivateChangesSite(multiprocessing.Process, ActivateChanges):
             "receive-config-sync",
             [
                 ("site_id", self._site_id),
-                ("sync_archive", sync_archive),
                 ("to_delete", repr(files_to_delete)),
                 ("config_generation", "%d" % remote_config_generation),
             ],
@@ -2144,10 +2165,16 @@ def apply_pre_17_sync_snapshot(
     return True
 
 
-def _need_to_update_config_after_sync() -> bool:
+def _need_to_update_mkps_after_sync() -> bool:
     if not (central_version := _request.headers.get("x-checkmk-version")):
         raise ValueError("Request header x-checkmk-version is missing")
     logger.debug("Local version: %s, Central version: %s", cmk_version.__version__, central_version)
+    return cmk_version.__version__ != central_version
+
+
+def _need_to_update_config_after_sync() -> bool:
+    if not (central_version := _request.headers.get("x-checkmk-version")):
+        raise ValueError("Request header x-checkmk-version is missing")
     return not cmk_version.is_same_major_version(
         cmk_version.__version__,
         central_version,
@@ -2180,9 +2207,10 @@ def _execute_post_config_sync_actions(site_id: SiteId) -> None:
         # When receiving configuration from a central site that uses a previous major
         # version, the config migration logic has to be executed to make the local
         # configuration compatible with the local Checkmk version.
-        if _need_to_update_config_after_sync():
+        if _need_to_update_mkps_after_sync():
             logger.debug("Fixing up synced packages")
             cmk.utils.packaging.pre_update_config_actions(logger)
+        if _need_to_update_config_after_sync():
             logger.debug("Executing cmk-update-config")
             _execute_cmk_update_config()
 
@@ -2743,7 +2771,7 @@ def activate_changes_start(
                 )
             )
 
-    known_sites = allsites().keys()
+    known_sites = get_enabled_sites().keys()
     for site in sites:
         if site not in known_sites:
             raise MKUserError(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -215,7 +215,7 @@ class RescheduleIcon(Icon):
                 if row[what + "_check_command"].startswith("check_mk-"):
                     servicedesc = "Check_MK"
                     icon = "reload_cmk"
-                    txt = _("Reschedule 'Checkmk' service")
+                    txt = _("Reschedule 'Check_MK' service")
 
             url = "onclick:cmk.views.reschedule_check(this, %s, %s, %s, %s);" % (
                 json.dumps(row["site"]),
@@ -1125,6 +1125,8 @@ class AggregationIcon(Icon):
             start = args.find("-a' '") + 5
             end = args.find("' ", start)
             aggr_name = args[start:end]
+            aggr_name = aggr_name.replace("$HOSTADDRESS$", row["host_address"])
+            aggr_name = aggr_name.replace("$HOSTNAME$", row["host_name"])
 
             url = "%s/check_mk/view.py?view_name=aggr_single&aggr_name=%s" % (
                 base_url,

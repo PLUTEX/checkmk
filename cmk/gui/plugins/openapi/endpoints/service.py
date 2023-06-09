@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Service status
@@ -18,7 +18,7 @@ How to use the query DSL used in the `query` parameters of these endpoints, have
 These endpoints support all [Livestatus filter operators](https://docs.checkmk.com/latest/en/livestatus_references.html#heading_filter),
 which you can look up in the Checkmk documentation.
 
-For a detailed list of columns have a look at the [services table](https://github.com/tribe29/checkmk/blob/master/cmk/gui/plugins/openapi/livestatus_helpers/tables/services.py)
+For a detailed list of columns have a look at the [services table](https://github.com/checkmk/checkmk/blob/master/cmk/gui/plugins/openapi/livestatus_helpers/tables/services.py)
 definition on GitHub.
 """
 import typing
@@ -47,6 +47,7 @@ PERMISSIONS = permissions.Ignore(
             permissions.Perm("general.see_all"),
             permissions.Perm("bi.see_all"),
             permissions.Perm("mkeventd.seeall"),
+            permissions.Perm("wato.see_all_folders"),
         ]
     )
 )
@@ -97,20 +98,20 @@ def show_service(params):
     service_description = params["service_description"]
     host_name = params["host_name"]
     live = sites.live()
-    q = Query(
-        [
-            Services.description,
-            Services.host_name,
-            Services.state_type,
-            Services.state,
-            Services.last_check,
-        ],
-        filter_expr=And(
-            Services.host_name.op("=", params["host_name"]),
-            Services.description.op("=", service_description),
-        ),
-    )
     try:
+        q = Query(
+            [
+                Services.description,
+                Services.host_name,
+                Services.state_type,
+                Services.state,
+                Services.last_check,
+            ],
+            filter_expr=And(
+                Services.host_name.op("=", params["host_name"]),
+                Services.description.op("=", service_description),
+            ),
+        )
         service = q.fetchone(live)
     except ValueError:
         return problem(
@@ -155,6 +156,7 @@ def _list_host_services(param):
     method="get",
     query_params=[OPTIONAL_HOST_NAME, *PARAMETERS],
     tag_group="Monitoring",
+    blacklist_in=["swagger-ui"],
     response_schema=response_schemas.DomainObjectCollection,
     permissions_required=PERMISSIONS,
 )

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -501,7 +501,7 @@ filter_registry.register(
         title=_l("Service Contact Group"),
         sort_index=206,
         description=_l("Optional selection of service contact group"),
-        autocompleter=GroupAutocompleterConfig(ident="allgroups", group_type="service"),
+        autocompleter=GroupAutocompleterConfig(ident="allgroups", group_type="contact"),
         query_filter=query_filters.MultipleQuery(
             ident="optservice_contactgroup",
             request_var="optservice_contact_group",
@@ -1521,11 +1521,12 @@ class FilterHostAuxTags(Filter):
     def display(self, value: FilterHTTPVariables) -> None:
         for num in range(self.query_filter.count):
             varname = "%s_%d" % (self.query_filter.var_prefix, num)
+            negate_varname = varname + "_neg"
             html.dropdown(
                 varname, self._options(), deflt=value.get(varname, ""), ordered=True, class_="neg"
             )
             html.open_nobr()
-            html.checkbox(varname + "_neg", bool(value.get(varname)), label=_("negate"))
+            html.checkbox(negate_varname, bool(value.get(negate_varname)), label=_("negate"))
             html.close_nobr()
 
     @staticmethod
@@ -1777,7 +1778,7 @@ class FilterECServiceLevelRange(Filter):
         assert lower_bound is not None
         assert upper_bound is not None
         for row in rows:
-            service_level = int(row["custom_variables"]["EC_SL"])
+            service_level = int(row["%s_custom_variables" % self.info]["EC_SL"])
             if int(lower_bound) <= service_level <= int(upper_bound):
                 filtered_rows.append(row)
 
@@ -1791,7 +1792,7 @@ class FilterECServiceLevelRange(Filter):
 
     def columns_for_filter_table(self, context: VisualContext) -> Iterable[str]:
         if self.ident in context:
-            yield "custom_variables"
+            yield "%s_custom_variables" % self.info
 
 
 filter_registry.register(

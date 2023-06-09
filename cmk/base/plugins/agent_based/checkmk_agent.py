@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -75,6 +75,7 @@ def _check_cmk_agent_installation(
     yield from _check_python_plugins(
         agent_info.get("failedpythonplugins"), agent_info.get("failedpythonreason")
     )
+    yield from _check_encryption_panic(agent_info.get("encryptionpanic"))
 
 
 def _check_version(
@@ -169,6 +170,16 @@ def _check_python_plugins(
         )
 
 
+def _check_encryption_panic(
+    panic: Optional[str],
+) -> CheckResult:
+    if panic:
+        yield Result(
+            state=State.CRIT,
+            summary="Failed to apply symmetric encryption, aborting communication.",
+        )
+
+
 def _check_agent_update(
     update_fail_reason: Optional[str],
     on_update_fail_action: Optional[str],
@@ -223,6 +234,11 @@ def _get_error_result(error: str, params: Mapping[str, Any]) -> CheckResult:
     if "deployment is currently globally disabled" in error:
         yield Result(
             state=State(params.get("error_deployment_globally_disabled", default_state)),
+            summary=error,
+        )
+    if "agent updates are disabled for hostname" in error.lower():
+        yield Result(
+            state=State(params.get("error_deployment_disabled_for_hostname", default_state)),
             summary=error,
         )
     else:

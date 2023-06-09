@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Code for computing the table of checks of hosts."""
@@ -66,8 +66,6 @@ def _aggregate_check_table_services(
             s for s in config_cache.get_autochecks_of(host_config.hostname) if sfilter.keep(s)
         )
 
-    yield from (s for s in _get_static_check_entries(config_cache, host_config) if sfilter.keep(s))
-
     # Now add checks a cluster might receive from its nodes
     if host_config.is_cluster:
         yield from (
@@ -75,16 +73,34 @@ def _aggregate_check_table_services(
             for s in _get_clustered_services(config_cache, host_config, skip_autochecks)
             if sfilter.keep(s)
         )
-        return
 
-    # add all services from the nodes inside the host's clusters
-    # the host must try to fetch all services that are discovered in his clusters
-    # in case of failover, it has to provide the service data to the cluster
-    # even when the service was never discovered on it
+    yield from (s for s in _get_static_check_entries(config_cache, host_config) if sfilter.keep(s))
+
+    # NOTE: as far as I can see, we only have two cases with the filter mode.
+    # Either we compute services to check, or we compute services for fetching.
+    if filter_mode is not FilterMode.INCLUDE_CLUSTERED:
+        return
+    # Now we are in the latter case.
+    # Since the clusters don't fetch data themselves, we may have to include more
+    # services than are attached to the host itself, so that we get the needed data
+    # even if a failover occurred since the last discovery.
+
+    # Consider the case where we've clustered 3 nodes `node{1,2,3}`.
+    # Let `service A` be
+    #  * (only) in the autochecks of node1
+    #  * clustered by a clustered service rule matching hosts node1 and node2.
+    #
+    # The following must include `service A` for node1 and node2 but *not* for node3.
+    # Failing to exclude node3 might add an undesired service to it.
+    # For node1 it was added from the autochecks above.
     yield from (
         s
+        # ... this adds it for node2
         for s in _get_services_from_cluster_nodes(config_cache, host_config.hostname)
         if sfilter.keep(s)
+        # ... and this condition prevents it from being added on node3
+        # 'not is_mine' means: would it be there, it would be clustered.
+        and not sfilter.is_mine(s)
     )
 
 
@@ -124,18 +140,28 @@ class _ServiceFilter:
         if not self._host_part_of_clusters:
             return self._mode is not FilterMode.ONLY_CLUSTERED
 
-        host_of_service = self._config_cache.host_of_clustered_service(
-            self._host_name,
-            service.description,
-            part_of_clusters=self._host_part_of_clusters,
-        )
-        svc_is_mine = self._host_name == host_of_service
+        svc_is_mine = self.is_mine(service)
 
         if self._mode is FilterMode.NONE:
             return svc_is_mine
 
         # self._mode is FilterMode.ONLY_CLUSTERED
         return not svc_is_mine
+
+    def is_mine(self, service: ConfiguredService) -> bool:
+        """Determine whether a service should be displayed on this host's service overview.
+
+        If the service should be displayed elsewhere, this means the service is clustered and
+        should be displayed on the cluster host's service overview.
+        """
+        return (
+            self._config_cache.host_of_clustered_service(
+                self._host_name,
+                service.description,
+                part_of_clusters=self._host_part_of_clusters,
+            )
+            == self._host_name
+        )
 
 
 def _get_static_check_entries(
@@ -185,13 +211,11 @@ def _get_clustered_services(
     skip_autochecks: bool,
 ) -> Iterable[ConfiguredService]:
     for node in host_config.nodes or []:
-        # TODO: Cleanup this to work exactly like the logic above (for a single host)
-        # (mo): in particular: this means that autochecks will win over static checks.
-        #       for a single host the static ones win.
         node_config = config_cache.get_host_config(node)
-        node_checks = list(_get_static_check_entries(config_cache, node_config))
+        node_checks: list[ConfiguredService] = []
         if not (skip_autochecks or host_config.is_ping_host):
             node_checks += config_cache.get_autochecks_of(node)
+        node_checks.extend(_get_static_check_entries(config_cache, node_config))
 
         yield from (
             service

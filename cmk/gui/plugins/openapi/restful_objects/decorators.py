@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Decorators to expose API endpoints.
@@ -39,6 +39,7 @@ from urllib import parse
 
 import apispec  # type: ignore[import]
 import apispec.utils  # type: ignore[import]
+from marshmallow import fields as ma_fields
 from marshmallow import Schema, ValidationError
 from marshmallow.schema import SchemaMeta
 from werkzeug.datastructures import MultiDict
@@ -46,6 +47,7 @@ from werkzeug.http import parse_options_header
 from werkzeug.utils import import_string
 
 from cmk.utils import store
+from cmk.utils.type_defs import HTTPMethod
 
 from cmk.gui import fields
 from cmk.gui import http as cmk_http
@@ -67,7 +69,6 @@ from cmk.gui.plugins.openapi.restful_objects.type_defs import (
     EndpointTarget,
     ErrorStatusCodeInt,
     ETagBehaviour,
-    HTTPMethod,
     LinkRelation,
     LocationType,
     OpenAPIParameter,
@@ -234,14 +235,14 @@ def _filter_profile_headers(arg_dict: ArgDict) -> ArgDict:
     return {key: value for key, value in arg_dict.items() if not key.startswith("_profile")}
 
 
-def _from_multi_dict(multi_dict: MultiDict) -> ArgDict:
+def _from_multi_dict(multi_dict: MultiDict, list_fields: tuple[str, ...]) -> ArgDict:
     """Transform a MultiDict to a non-heterogenous dict
 
     Meaning: lists are lists and lists of lenght 1 are scalars.
 
     Examples:
-        >>> _from_multi_dict(MultiDict([('a', '1'), ('a', '2'), ('c', '3')]))
-        {'a': ['1', '2'], 'c': '3'}
+        >>> _from_multi_dict(MultiDict([('a', '1'), ('a', '2'), ('c', '3'), ('d', '4')]), ('d',))
+        {'a': ['1', '2'], 'c': '3', 'd': ['4']}
 
     Args:
         multi_dict:
@@ -253,7 +254,7 @@ def _from_multi_dict(multi_dict: MultiDict) -> ArgDict:
     """
     ret = {}
     for key, values in multi_dict.to_dict(flat=False).items():
-        if len(values) == 1:
+        if len(values) == 1 and key not in list_fields:
             ret[key] = values[0]
         else:
             ret[key] = values
@@ -688,8 +689,17 @@ class Endpoint:
 
             try:
                 if query_schema:
+                    list_fields = tuple(
+                        {
+                            k
+                            for k, v in query_schema().fields.items()
+                            if isinstance(v, ma_fields.List)
+                        }
+                    )
                     _params.update(
-                        query_schema().load(_filter_profile_headers(_from_multi_dict(request.args)))
+                        query_schema().load(
+                            _filter_profile_headers(_from_multi_dict(request.args, list_fields))
+                        )
                     )
 
                 if header_schema:

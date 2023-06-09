@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -205,7 +205,18 @@ def format_file_name(*, name: str, version: str) -> str:
     >>> f(name="a-a-a", version="99.99")
     'a-a-a-99.99.mkp'
 
+    >>> f(name="../foo", version="99.99")
+    Traceback (most recent call last):
+        ...
+    ValueError: Packagename and version must not contain slashes
+    >>> f(name="aaa", version="../")
+    Traceback (most recent call last):
+        ...
+    ValueError: Packagename and version must not contain slashes
+
     """
+    if "/" in name or "/" in version:
+        raise ValueError("Packagename and version must not contain slashes")
     return f"{name}-{version}{PACKAGE_EXTENSION}"
 
 
@@ -290,7 +301,7 @@ def get_initial_package_info(pacname: str) -> PackageInfo:
     }
 
 
-def uninstall(package: PackageInfo) -> None:
+def uninstall(package: PackageInfo, post_package_change_actions: bool = True) -> None:
     for part in get_package_parts() + get_config_parts():
         filenames = package["files"].get(part.ident, [])
         if len(filenames) > 0:
@@ -310,7 +321,8 @@ def uninstall(package: PackageInfo) -> None:
 
     (package_dir() / package["name"]).unlink()
 
-    _execute_post_package_change_actions(package)
+    if post_package_change_actions:
+        _execute_post_package_change_actions(package)
 
 
 def store_package(file_content: bytes) -> PackageInfo:
@@ -348,29 +360,51 @@ def read_package(package_file_base_name: str) -> bytes:
         return fh.read()
 
 
-def disable(package_name: PackageName) -> None:
-    package_path, package_meta_info = _find_path_and_package_info(package_name)
+def disable(package_name: PackageName, package_version: Optional[str]) -> None:
+    package_path, package_meta_info = _find_path_and_package_info(package_name, package_version)
 
-    if package_name in installed_names():
-        uninstall(package_meta_info)
+    if (installed_package := read_package_info(package_name)) is not None:
+        if package_version is None or installed_package["version"] == package_version:
+            uninstall(package_meta_info)
 
     package_path.unlink()
 
 
-def _find_path_and_package_info(package_name: PackageName) -> Tuple[Path, PackageInfo]:
+def _find_path_and_package_info(
+    package_name: PackageName,
+    package_version: Optional[str],
+) -> Tuple[Path, PackageInfo]:
+
+    # not sure if we need this, but better safe than sorry.
+    def filename_matches(package: PackageInfo, name: str) -> bool:
+        return format_file_name(name=package["name"], version=package["version"]) == name
+
+    def package_matches(
+        package: PackageInfo, package_name: PackageName, package_version: Optional[str]
+    ) -> bool:
+        return package["name"] == package_name and (
+            package_version is None or package["version"] == package_version
+        )
 
     enabled_packages = get_enabled_package_infos()
 
-    for package_path in _get_enabled_package_paths():
-        if (package := enabled_packages.get(package_path.name)) is None:
-            continue
-        if (
-            package["name"] == package_name
-            or format_file_name(name=package["name"], version=package["version"]) == package_name
-        ):
-            return package_path, package
+    matching_packages = [
+        (package_path, package)
+        for package_path in _get_enabled_package_paths()
+        if (package := enabled_packages.get(package_path.name)) is not None
+        and (
+            filename_matches(package, package_name)
+            or package_matches(package, package_name, package_version)
+        )
+    ]
 
-    raise PackageException("Package %s is not enabled" % package_name)
+    package_str = f"{package_name}" + ("" if package_version is None else f" {package_version}")
+    if not matching_packages:
+        raise PackageException(f"Package {package_str} is not enabled")
+    if len(matching_packages) > 1:
+        raise PackageException(f"Package not unique: {package_str}")
+
+    return matching_packages[0]
 
 
 def create(pkg_info: PackageInfo) -> None:
@@ -426,12 +460,7 @@ def _get_full_package_path(package_file_name: str) -> Path:
 
 
 def install_optional_package(package_file_base_name: str) -> PackageInfo:
-    package_path = _get_full_package_path(package_file_base_name)
-    try:
-        return _install_by_path(package_path)
-    finally:
-        # it is enabled, even if installing failed.
-        mark_as_enabled(package_path)
+    return _install_by_path(_get_full_package_path(package_file_base_name))
 
 
 def mark_as_enabled(package_path: Path) -> None:
@@ -441,6 +470,10 @@ def mark_as_enabled(package_path: Path) -> None:
     be synchronized with the remote sites.
     """
     destination = cmk.utils.paths.local_enabled_packages_dir / package_path.name
+
+    # hack: we might be installing from the path to an already enabled package :-(
+    if destination == package_path:
+        return
 
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -462,18 +495,29 @@ def remove_enabled_mark(package_info: PackageInfo) -> None:
     )  # should never be missing, but don't crash in messed up state
 
 
-def _install_by_path(package_path: Path, allow_outdated: bool = True) -> PackageInfo:
+def _install_by_path(
+    package_path: Path, allow_outdated: bool = True, post_package_change_actions: bool = True
+) -> PackageInfo:
     with package_path.open("rb") as f:
-        return install(file_object=cast(BinaryIO, f), allow_outdated=allow_outdated)
+        try:
+            return _install(
+                file_object=cast(BinaryIO, f),
+                allow_outdated=allow_outdated,
+                post_package_change_actions=post_package_change_actions,
+            )
+        finally:
+            # it is enabled, even if installing failed
+            mark_as_enabled(package_path)
 
 
-def install(
+def _install(
     file_object: BinaryIO,
     # I am not sure whether we should install outdated packages by default -- but
     #  a) this is the compatible way to go
     #  b) users cannot even modify packages without installing them
     # Reconsider!
     allow_outdated: bool = True,
+    post_package_change_actions: bool = True,
 ) -> PackageInfo:
     package = _get_package_info_from_package(file_object)
     file_object.seek(0)
@@ -565,12 +609,16 @@ def install(
             if part.ident == "ec_rule_packs":
                 _remove_packaged_rule_packs(list(remove_files), delete_export=False)
 
-        remove_enabled_mark(old_package)
+        # Do not remove the enabled mark if the version has not changed.
+        # In this case we might be installing from an already enabled package, and the enabled mark would not be recreated.
+        if (old_package["name"], old_package["version"]) != (package["name"], package["version"]):
+            remove_enabled_mark(old_package)
 
     # Last but not least install package file
     write_package_info(package)
 
-    _execute_post_package_change_actions(package)
+    if post_package_change_actions:
+        _execute_post_package_change_actions(package)
 
     return package
 
@@ -939,11 +987,14 @@ def rule_pack_id_to_mkp() -> Dict[str, Any]:
 
 def update_active_packages(log: logging.Logger) -> None:
     """Update which of the enabled packages are actually active (installed)"""
-    _deinstall_inapplicable_active_packages(log)
-    _install_applicable_inactive_packages(log)
+    _deinstall_inapplicable_active_packages(log, post_package_change_actions=False)
+    _install_applicable_inactive_packages(log, post_package_change_actions=False)
+    _execute_post_package_change_actions(None)
 
 
-def _deinstall_inapplicable_active_packages(log: logging.Logger) -> None:
+def _deinstall_inapplicable_active_packages(
+    log: logging.Logger, *, post_package_change_actions: bool
+) -> None:
     for package_name in sorted(installed_names()):
         package_info = read_package_info(package_name)
         if package_info is None:
@@ -959,23 +1010,35 @@ def _deinstall_inapplicable_active_packages(log: logging.Logger) -> None:
             )
         except PackageException as exc:
             log.log(VERBOSE, "[%s]: Uninstalling (%s)", package_name, exc)
-            uninstall(package_info)
+            uninstall(package_info, post_package_change_actions=post_package_change_actions)
         else:
             log.log(VERBOSE, "[%s]: Kept", package_name)
 
 
-def _install_applicable_inactive_packages(log: logging.Logger) -> None:
-    for package_path in _sort_enabled_packages_for_installation(log):
+def _install_applicable_inactive_packages(
+    log: logging.Logger, *, post_package_change_actions: bool
+) -> None:
+    for name, package_paths in _sort_enabled_packages_for_installation(log):
+        for version, path in package_paths:
+            try:
+                _install_by_path(
+                    path,
+                    allow_outdated=False,
+                    post_package_change_actions=post_package_change_actions,
+                )
+            except PackageException as exc:
+                logger.log(VERBOSE, "[%s]: Verison %s not installed (%s)", name, version, exc)
+            else:
+                logger.log(VERBOSE, "[%s]: Version %s installed", name, version)
+                # We're done with this package.
+                # Do not try to install older versions, or the installation function will
+                # silently downgrade the package.
+                break
 
-        try:
-            _install_by_path(package_path, allow_outdated=False)
-        except PackageException as exc:
-            logger.log(VERBOSE, "[%s]: Not installed (%s)", package_path.name, exc)
-        else:
-            logger.log(VERBOSE, "[%s]: Installed", package_path.name)
 
-
-def _sort_enabled_packages_for_installation(log: logging.Logger) -> Iterable[Path]:
+def _sort_enabled_packages_for_installation(
+    log: logging.Logger,
+) -> Iterable[Tuple[str, Iterable[Tuple[str, Path]]]]:
     packages_by_name: Dict[str, Dict[str, Path]] = {}
     for pkg_path in _get_enabled_package_paths():
         with pkg_path.open("rb") as pkg:
@@ -997,18 +1060,27 @@ def _sort_enabled_packages_for_installation(log: logging.Logger) -> Iterable[Pat
 
 def _sort_by_name_then_newest_version(
     packages_by_name: Mapping[str, Mapping[str, Path]]
-) -> Iterable[Path]:
+) -> Iterable[tuple[str, Iterable[tuple[str, Path]]]]:
     """
-    >>> _sort_by_name_then_newest_version({
+    >>> from pprint import pprint
+    >>> pprint(_sort_by_name_then_newest_version({
     ...    "boo_package": {"1.2": "old_boo", "1.3": "new_boo"},
     ...    "argl_extension": {"canoo": "lexically_first", "dling": "lexically_later"},
-    ... })
-    ['lexically_later', 'lexically_first', 'new_boo', 'old_boo']
+    ... }))
+    [('argl_extension',
+      [('dling', 'lexically_later'), ('canoo', 'lexically_first')]),
+     ('boo_package', [('1.3', 'new_boo'), ('1.2', 'old_boo')])]
     """
+
+    def sortkey(item: tuple[str, Path]) -> tuple[tuple[float, str], ...]:
+        return _version_sort_key(item[0])
+
     return [
-        paths_by_version[version]
+        (
+            name,
+            sorted(paths_by_version.items(), key=sortkey, reverse=True),
+        )
         for name, paths_by_version in sorted(packages_by_name.items())
-        for version in sorted(paths_by_version, key=_version_sort_key, reverse=True)
     ]
 
 
@@ -1063,7 +1135,7 @@ def disable_outdated() -> None:
             _raise_for_too_new_cmk_version(package_name, package_info, cmk_version.__version__)
         except PackageException as exc:
             logger.log(VERBOSE, "[%s]: Disable outdated package: %s", package_name, exc)
-            disable(package_name)
+            disable(package_name, package_info["version"])
         else:
             logger.log(VERBOSE, "[%s]: Not disabling", package_name)
 
@@ -1204,10 +1276,10 @@ def _is_16_feature_pack_package(package_name: PackageName, package_info: Package
     return package_info.get("version", "").startswith("1.")
 
 
-def _execute_post_package_change_actions(package: PackageInfo) -> None:
+def _execute_post_package_change_actions(package: Optional[PackageInfo]) -> None:
     _build_setup_search_index_background()
 
-    if _package_contains_gui_files(package):
+    if package is None or _package_contains_gui_files(package):
         _reload_apache()
 
 
@@ -1224,11 +1296,12 @@ def _package_contains_gui_files(package: PackageInfo) -> bool:
 
 def _reload_apache() -> None:
     try:
-        subprocess.run(
-            ["omd", "reload", "apache"],
-            capture_output=True,
-            check=True,
-        )
+        subprocess.run(["omd", "status", "apache"], capture_output=True, check=True)
+    except subprocess.CalledProcessError:
+        return
+
+    try:
+        subprocess.run(["omd", "reload", "apache"], capture_output=True, check=True)
     except subprocess.CalledProcessError:
         logger.error("Error reloading apache", exc_info=True)
 

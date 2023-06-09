@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -52,6 +52,7 @@ import cmk.utils.password_store as password_store
 import cmk.utils.paths
 import cmk.utils.store as store
 import cmk.utils.version as cmk_version
+from cmk.utils.crypto.password import Password
 from cmk.utils.macros import replace_macros_in_str
 from cmk.utils.site import omd_site
 from cmk.utils.type_defs import UserId
@@ -156,6 +157,51 @@ GroupMemberships = Dict[DistinguishedName, Dict[str, Union[str, List[str]]]]
 #   +----------------------------------------------------------------------+
 #   | This class realizes the ldap connection and communication            |
 #   '----------------------------------------------------------------------'
+
+
+def _get_ad_locator():
+    import activedirectory  # type: ignore[import] # pylint: disable=import-error
+    import six
+    from activedirectory.protocol.netlogon import Client as NetlogonClient  # type: ignore[import]
+
+    class FasterDetectLocator(activedirectory.Locator):
+        def _detect_site(self, domain):
+            """Detect our site using the netlogon protocol.
+            This modified function only changes the number of parallel queried servers from 3 to 60"""
+            self.m_logger.debug("detecting site")
+            query = "_ldap._tcp.%s" % domain.lower()
+            answer = self._dns_query(query, "SRV")
+            servers = self._order_dns_srv(answer)
+            addresses = self._extract_addresses_from_srv(servers)
+            replies = []
+            netlogon = NetlogonClient()
+            max_servers_parallel = 60
+            for i in range(0, len(addresses), max_servers_parallel):
+                for addr in addresses[i : i + max_servers_parallel]:
+                    self.m_logger.debug("NetLogon query to %s", addr[0])
+                    try:
+                        netlogon.query(addr, domain)
+                    except Exception:
+                        continue
+                replies += netlogon.call()
+                self.m_logger.debug("%d replies", len(replies))
+                if len(replies) >= 1:
+                    break
+            if not replies:
+                self.m_logger.error("could not detect site")
+                return
+            found_sites: Dict[str, int] = {}
+            for reply in replies:
+                try:
+                    found_sites[reply.client_site] += 1
+                except KeyError:
+                    found_sites[reply.client_site] = 1
+            sites_list = [(value, key) for key, value in found_sites.items()]
+            sites_list.sort()
+            self.m_logger.debug("site detected as %s", sites_list[-1][1])
+            return six.ensure_text(sites_list[0][1])
+
+    return FasterDetectLocator()
 
 
 @user_connector_registry.register
@@ -373,9 +419,7 @@ class LDAPUserConnector(UserConnector):
             self._logger.info("Using cached DC %s" % cached_server)
             return cached_server
 
-        import activedirectory  # type: ignore[import] # pylint: disable=import-error
-
-        locator = activedirectory.Locator()
+        locator = _get_ad_locator()
         locator.m_logger = self._logger
         try:
             server = locator.locate(domain)
@@ -740,6 +784,19 @@ class LDAPUserConnector(UserConnector):
         return replace_macros_in_str(tmpl, {"$OMD_SITE$": omd_site() or ""})
 
     def _sanitize_user_id(self, user_id):
+        if len(bytes(user_id, encoding="utf-8")) > 255:
+            # Note: starting in version 2.2 this check can happen in the UserId type, but here
+            # UserId is just a NewType.
+            raise MKLDAPException("The username is too long.")
+
+        def is_forbidden(c):
+            # ASCII control chars, space, '\', '/' and 'DEL'
+            return ord(c) <= 32 or c in "\\/\x7f"
+
+        if any(map(is_forbidden, user_id)) or user_id in [".", ".."]:
+            # encode to make control chars apparent in error message
+            raise MKLDAPException(f"Invalid user ID {user_id!r}")
+
         if self._config.get("lower_user_ids", False):
             user_id = user_id.lower()
 
@@ -1113,7 +1170,7 @@ class LDAPUserConnector(UserConnector):
     #
 
     # This function only validates credentials, no locked checking or similar
-    def check_credentials(self, user_id, password: str) -> CheckCredentialsResult:
+    def check_credentials(self, user_id: UserId, password: Password) -> CheckCredentialsResult:
         # Connect only to servers of connections, the user is configured for,
         # to avoid connection errors for unrelated servers
         user_connection_id = self._connection_id_of_user(user_id)
@@ -1158,7 +1215,7 @@ class LDAPUserConnector(UserConnector):
         # Try to bind with the user provided credentials. This unbinds the default
         # authentication which should be rebound again after trying this.
         try:
-            self._bind(user_dn, ("password", password))
+            self._bind(user_dn, ("password", password.raw))
             result = user_id if not self._has_suffix() else self._add_suffix(user_id)
         except (ldap.INVALID_CREDENTIALS, ldap.INAPPROPRIATE_AUTH) as e:
             self._logger.warning(

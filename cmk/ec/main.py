@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1716,11 +1716,11 @@ class EventServer(ECServerThread):
         elif isinstance(rule["state"], tuple) and rule["state"][0] == "text_pattern":
             state_patterns = rule["state"][1]
             text = event["text"]
-            if match(state_patterns["2"], text, complete=False) is not False:
+            if match(state_patterns.get("2", None), text, complete=False) is not False:
                 event["state"] = 2
-            elif match(state_patterns["1"], text, complete=False) is not False:
+            elif match(state_patterns.get("1", None), text, complete=False) is not False:
                 event["state"] = 1
-            elif match(state_patterns["0"], text, complete=False) is not False:
+            elif match(state_patterns.get("0", None), text, complete=False) is not False:
                 event["state"] = 0
             else:
                 event["state"] = 3
@@ -2847,23 +2847,24 @@ class StatusServer(ECServerThread):
         self._event_status.delete_events_by(lambda event: event["host"] == hostname, user)
 
     def handle_command_update(self, arguments: list[str]) -> None:
-        event_id, user, acknowledged, comment, contact = arguments
-        event = self._event_status.event(int(event_id))
-        if not event:
-            raise MKClientError("No event with id %s" % event_id)
-        # Note the common practice: We validate parameters *before* doing any changes.
-        if acknowledged:
-            ack = int(acknowledged)
-            if ack and event["phase"] not in ["open", "ack"]:
-                raise MKClientError("You cannot acknowledge an event that is not open.")
-            event["phase"] = "ack" if ack else "open"
-        if comment:
-            event["comment"] = comment
-        if contact:
-            event["contact"] = contact
-        if user:
-            event["owner"] = user
-        self._history.add(event, "UPDATE", user)
+        event_ids, user, acknowledged, comment, contact = arguments
+        for event_id in event_ids.split(","):
+            event = self._event_status.event(int(event_id))
+            if not event:
+                raise MKClientError(f"No event with id {event_id}")
+            # Note the common practice: We validate parameters *before* doing any changes.
+            if acknowledged:
+                ack = int(acknowledged)
+                if ack and event["phase"] not in ["open", "ack"]:
+                    raise MKClientError("You cannot acknowledge an event that is not open.")
+                event["phase"] = "ack" if ack else "open"
+            if comment:
+                event["comment"] = comment
+            if contact:
+                event["contact"] = contact
+            if user:
+                event["owner"] = user
+            self._history.add(event, "UPDATE", user)
 
     def handle_command_create(self, arguments: list[str]) -> None:
         # Would rather use process_raw_line(), but we are already
@@ -3321,6 +3322,7 @@ class EventStatus:
     def remove_oldest_event(self, ty, event):
         if ty == "overall":
             self._logger.log(VERBOSE, "  Removing oldest event")
+            self._history.add(self._events[0], "AUTODELETE")
             self._remove_event_by_nr(0)
         elif ty == "by_rule":
             self._logger.log(VERBOSE, '  Removing oldest event of rule "%s"', event["rule_id"])
@@ -3333,6 +3335,7 @@ class EventStatus:
     def _remove_oldest_event_of_rule(self, rule_id) -> None:
         for event in self._events:
             if event["rule_id"] == rule_id:
+                self._history.add(event, "AUTODELETE")
                 self.remove_event(event)
                 return
 
@@ -3340,6 +3343,7 @@ class EventStatus:
     def _remove_oldest_event_of_host(self, hostname: str) -> None:
         for event in self._events:
             if event["host"] == hostname:
+                self._history.add(event, "AUTODELETE")
                 self.remove_event(event)
                 return
 

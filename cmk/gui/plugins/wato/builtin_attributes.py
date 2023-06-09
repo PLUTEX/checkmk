@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 import time
@@ -194,7 +194,12 @@ class HostAttributeIPv6Address(ABCHostAttributeValueSpec):
     def openapi_field(self) -> gui_fields.Field:
         return fields.String(
             description="An IPv6 address.",
-            validate=gui_fields.ValidateIPv6(),
+            validate=gui_fields.ValidateAnyOfValidators(
+                [
+                    gui_fields.ValidateIPv6(),
+                    validators.ValidateHostName(),
+                ]
+            ),
         )
 
 
@@ -282,7 +287,14 @@ class HostAttributeAdditionalIPv6Addresses(ABCHostAttributeValueSpec):
 
     def openapi_field(self) -> gui_fields.Field:
         return fields.List(
-            fields.String(validate=gui_fields.ValidateIPv6()),
+            fields.String(
+                validate=gui_fields.ValidateAnyOfValidators(
+                    [
+                        gui_fields.ValidateIPv6(),
+                        validators.ValidateHostName(),
+                    ]
+                ),
+            ),
             description="A list of IPv6 addresses.",
         )
 
@@ -574,7 +586,7 @@ class HostAttributeNetworkScan(ABCHostAttributeValueSpec):
                     title=_("Run as"),
                     help=_(
                         "Execute the network scan in the Check_MK user context of the "
-                        "choosen user. This user needs the permission to add new hosts "
+                        "chosen user. This user needs the permission to add new hosts "
                         "to this folder."
                     ),
                     choices=self._get_all_user_ids,
@@ -987,7 +999,9 @@ class HostAttributeSite(ABCHostAttributeValueSpec):
         )
 
     def openapi_field(self) -> gui_fields.Field:
-        return gui_fields.SiteField(description="The site that should monitor this host.")
+        return gui_fields.SiteField(
+            description="The site that should monitor this host.", presence="might_not_exist"
+        )
 
     def get_tag_groups(self, value):
         # Compatibility code for pre 2.0 sites. The SetupSiteChoice valuespec was previously setting

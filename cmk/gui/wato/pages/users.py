@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Modes for managing users and contacts"""
@@ -12,7 +12,8 @@ from typing import Iterator, List, Optional, overload, Tuple, Type, Union
 
 import cmk.utils.render as render
 import cmk.utils.version as cmk_version
-from cmk.utils.type_defs import timeperiod_spec_alias, UserId
+from cmk.utils.crypto.password import Password
+from cmk.utils.type_defs import timeperiod_spec_alias, user_id_22_regex, UserId
 
 import cmk.gui.background_job as background_job
 import cmk.gui.forms as forms
@@ -20,6 +21,7 @@ import cmk.gui.gui_background_job as gui_background_job
 import cmk.gui.plugins.userdb.utils as userdb_utils
 import cmk.gui.userdb as userdb
 import cmk.gui.watolib as watolib
+import cmk.gui.weblib as weblib
 from cmk.gui.breadcrumb import Breadcrumb
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.globals import config, html, request, transactions, user
@@ -50,7 +52,7 @@ from cmk.gui.plugins.wato.utils import (
     WatoMode,
 )
 from cmk.gui.sites import get_configured_site_choices
-from cmk.gui.table import table_element
+from cmk.gui.table import show_row_count, table_element
 from cmk.gui.type_defs import ActionResult, Choices, UserSpec
 from cmk.gui.utils.escaping import escape_to_html
 from cmk.gui.utils.ntop import get_ntop_connection_mandatory, is_ntop_available
@@ -60,7 +62,12 @@ from cmk.gui.valuespec import Alternative, DualListChoice, EmailAddress, FixedVa
 from cmk.gui.watolib.changes import make_object_audit_log_url
 from cmk.gui.watolib.global_settings import rulebased_notifications_enabled
 from cmk.gui.watolib.groups import load_contact_group_information
-from cmk.gui.watolib.users import delete_users, edit_users, make_user_object_ref
+from cmk.gui.watolib.users import (
+    delete_users,
+    edit_users,
+    make_user_object_ref,
+    verify_password_policy,
+)
 
 if cmk_version.is_managed_edition():
     import cmk.gui.cme.managed as managed  # pylint: disable=no-name-in-module
@@ -313,6 +320,8 @@ class ModeUsers(WatoMode):
 
         users = userdb.load_users()
 
+        self._show_incompatible_users(users.keys())
+
         entries = list(users.items())
 
         html.begin_form("bulk_delete_form", method="POST")
@@ -320,6 +329,8 @@ class ModeUsers(WatoMode):
         roles = userdb_utils.load_roles()
         timeperiods = watolib.timeperiods.load_timeperiods()
         contact_groups = load_contact_group_information()
+
+        html.div("", id_="row_info")
 
         with table_element("users", None, empty_text=_("No users are defined yet.")) as table:
             online_threshold = time.time() - config.user_online_maxage
@@ -527,8 +538,15 @@ class ModeUsers(WatoMode):
                     table.cell(_u(vs.title()))
                     html.write_text(vs.value_to_html(user_spec.get(name, vs.default_value())))
 
+        html.hidden_field("selection_id", weblib.selection_id())
         html.hidden_fields()
         html.end_form()
+
+        show_row_count(
+            row_count=(row_count := len(users)),
+            row_info=_("user") if row_count == 1 else _("users"),
+            selection_id="users",
+        )
 
         if not load_contact_group_information():
             url = "wato.py?mode=contact_groups"
@@ -548,6 +566,24 @@ class ModeUsers(WatoMode):
                 "notifications."
             )
             html.close_div()
+
+    def _show_incompatible_users(self, users: List[UserId]) -> None:
+        """
+        Some user IDs will no longer be allowed in Checkmk 2.2.0 (Werk #14393). Show a warning.
+        """
+        if incomp := [str(html.render_li(u)) for u in users if user_id_22_regex().match(u) is None]:
+            txt_incomp_users_found = _(
+                "%d users will not be compatible with future versions of Checkmk (see Werk #14393)."
+            ) % len(incomp)
+            txt_reveal_users = _("Affected users:")
+
+            html.show_warning(
+                escape_to_html(txt_incomp_users_found)
+                + html.render_br()
+                + html.render_details(
+                    html.render_summary(txt_reveal_users) + html.render_ul("".join(incomp))
+                )
+            )
 
 
 # TODO: Create separate ModeCreateUser()
@@ -686,6 +722,13 @@ class ModeEditUser(WatoMode):
             )
 
     def action(self) -> ActionResult:
+        def read_password_or_none(field: str) -> Optional[Password]:
+            # make a Password type only if the field has a non-"" value
+            # this is here because we don't have get_validated_type_input on 2.1 yet.
+            if pw := request.get_str_input(field):
+                return Password(pw)
+            return None
+
         if not transactions.check_transaction():
             return redirect(mode_url("users"))
 
@@ -720,19 +763,20 @@ class ModeEditUser(WatoMode):
         # Authentication: Password or Secret
         auth_method = request.var("authmethod")
         if auth_method == "secret":
-            secret = request.get_str_input_mandatory("_auth_secret", "").strip()
+            secret = request.get_str_input_mandatory("_auth_secret", "")
             if secret:
                 user_attrs["automation_secret"] = secret
-                user_attrs["password"] = hash_password(secret)
+                user_attrs["password"] = hash_password(Password(secret))
                 increase_serial = True  # password changed, reflect in auth serial
+                # automation users cannot set the passwords themselves.
+                user_attrs["last_pw_change"] = int(time.time())
+                user_attrs.pop("enforce_pw_change", None)
             elif "automation_secret" not in user_attrs and "password" in user_attrs:
                 del user_attrs["password"]
 
         else:
-            password = request.get_str_input_mandatory("_password_" + self._pw_suffix(), "").strip()
-            password2 = request.get_str_input_mandatory(
-                "_password2_" + self._pw_suffix(), ""
-            ).strip()
+            password = read_password_or_none("_password_" + self._pw_suffix())
+            password2 = read_password_or_none("_password2_" + self._pw_suffix())
 
             # We compare both passwords only, if the user has supplied
             # the repeation! We are so nice to our power users...
@@ -748,6 +792,7 @@ class ModeEditUser(WatoMode):
                     del user_attrs["password"]  # which was the encrypted automation password!
 
             if password:
+                verify_password_policy(password)
                 user_attrs["password"] = hash_password(password)
                 user_attrs["last_pw_change"] = int(time.time())
                 increase_serial = True  # password changed, reflect in auth serial
@@ -1003,6 +1048,7 @@ class ModeEditUser(WatoMode):
             size=30,
             id_="automation_secret",
             placeholder="******" if "automation_secret" in self._user else "",
+            autocomplete="off",
         )
         html.write_text(" ")
         html.open_b(style=["position: relative", "top: 4px;"])

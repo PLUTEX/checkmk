@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -16,6 +16,7 @@ from six import ensure_str
 import cmk.utils.rulesets.ruleset_matcher as ruleset_matcher
 import cmk.utils.tags
 import cmk.utils.version as cmk_version
+from cmk.utils.crypto.password import Password
 from cmk.utils.exceptions import MKException, MKGeneralException
 from cmk.utils.type_defs import DiscoveryResult, TagConfigSpec, TagID
 
@@ -41,7 +42,7 @@ from cmk.gui.plugins.webapi.utils import (
 from cmk.gui.watolib.check_mk_automations import discovery, try_discovery
 from cmk.gui.watolib.groups import load_contact_group_information
 from cmk.gui.watolib.tags import TagConfigFile
-from cmk.gui.watolib.utils import try_bake_agents_for_hosts
+from cmk.gui.watolib.utils import restore_snmp_community_tuple, try_bake_agents_for_hosts
 
 # .
 #   .--Folders-------------------------------------------------------------.
@@ -116,6 +117,7 @@ class APICallFolders(APICallCollection):
         else:
             folder_alias = os.path.basename(folder_path)
 
+        folder_attributes = restore_snmp_community_tuple(folder_attributes)
         # Validates host and folder attributes, since there are no real folder attributes, at all...
         validate_host_attributes(folder_attributes, new=True)
 
@@ -142,6 +144,7 @@ class APICallFolders(APICallCollection):
         else:
             folder_alias = os.path.basename(folder_path)
 
+        folder_attributes = restore_snmp_community_tuple(folder_attributes)
         # Validates host and folder attributes, since there are no real folder attributes, at all...
         validate_host_attributes(folder_attributes, new=False)
 
@@ -194,26 +197,22 @@ class APICallHosts(APICallCollection):
                 "required_keys": ["hostname", "folder"],
                 "required_permissions": ["wato.manage_hosts", "wato.edit_hosts"],
                 "optional_keys": ["attributes", "nodes", "create_folders"],
-                "required_input_format": "python",
             },
             "add_hosts": {
                 "handler": self._add_hosts,
                 "required_permissions": ["wato.manage_hosts", "wato.edit_hosts"],
                 "required_keys": ["hosts"],
-                "required_input_format": "python",
             },
             "edit_host": {
                 "handler": self._edit,
                 "required_keys": ["hostname"],
                 "required_permissions": ["wato.edit_hosts"],
                 "optional_keys": ["unset_attributes", "attributes", "nodes"],
-                "required_input_format": "python",
             },
             "edit_hosts": {
                 "handler": self._edit_hosts,
                 "required_permissions": ["wato.edit_hosts"],
                 "required_keys": ["hosts"],
-                "required_input_format": "python",
             },
             "get_host": {
                 "handler": self._get,
@@ -221,7 +220,6 @@ class APICallHosts(APICallCollection):
                 "optional_keys": ["effective_attributes"],
                 "required_permissions": ["wato.see_all_folders"],
                 "locking": False,
-                "required_output_format": "python",
             },
             "delete_host": {
                 "handler": self._delete,
@@ -238,7 +236,6 @@ class APICallHosts(APICallCollection):
                 "optional_keys": ["effective_attributes"],
                 "required_permissions": ["wato.see_all_folders"],
                 "locking": False,
-                "required_output_format": "python",
             },
         }
 
@@ -269,6 +266,7 @@ class APICallHosts(APICallCollection):
         if ".nodes" in attributes:
             cluster_nodes = attributes[".nodes"]
             del attributes[".nodes"]
+        attributes = restore_snmp_community_tuple(attributes)
         validate_host_attributes(attributes, new=True)
 
         # Create folder(s)
@@ -323,6 +321,7 @@ class APICallHosts(APICallCollection):
         if ".nodes" in attributes:
             cluster_nodes = attributes[".nodes"]
             del attributes[".nodes"]
+        attributes = restore_snmp_community_tuple(attributes)
         validate_host_attributes(attributes, new=False)
 
         # Update existing attributes. Add new, remove unset_attributes
@@ -595,7 +594,12 @@ class APICallUsers(APICallCollection):
             # Note: Use the htpasswd wrapper for hash_password below, so we get MKUserError if
             #       anything goes wrong.
             if "password" in values:
-                values["password"] = htpasswd.hash_password(values["password"])
+                try:
+                    pw = Password(values["password"])
+                except ValueError as e:
+                    raise MKUserError("password", str(e))
+
+                values["password"] = htpasswd.hash_password(pw)
                 values["serial"] = 1
 
             user_template.update(values)
@@ -648,7 +652,11 @@ class APICallUsers(APICallCollection):
 
             new_password = set_attributes.get("password")
             if new_password:
-                user_attrs["password"] = htpasswd.hash_password(new_password)
+                try:
+                    pw = Password(new_password)
+                except ValueError as e:
+                    raise MKUserError("password", str(e))
+                user_attrs["password"] = htpasswd.hash_password(pw)
                 user_attrs["serial"] = user_attrs.get("serial", 0) + 1
 
             edit_user_objects[user_id] = {"attributes": user_attrs, "is_new_user": False}

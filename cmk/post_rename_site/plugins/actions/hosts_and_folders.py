@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -31,6 +31,8 @@ def update_hosts_and_folders(old_site_id: SiteId, new_site_id: SiteId) -> None:
             if host.attribute("site") == old_site_id:
                 logger.debug("Host %s: Update explicitly set site", host.name())
                 host.set_attribute("site", new_site_id)
+            if (global_ident := host.attribute("locked_by")) and global_ident[0] == old_site_id:
+                host.set_attribute("locked_by", (new_site_id, *global_ident[1:]))
 
         # Always rewrite the host config: The host_tags need to be updated, even in case there is no
         # site_id explicitly set. Just to be sure everything is fine we also rewrite the folder

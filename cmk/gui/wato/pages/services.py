@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Modes for services and discovery"""
@@ -23,8 +23,10 @@ from typing import (
 )
 
 import cmk.utils.render
+import cmk.utils.version as cmk_version
 from cmk.utils.check_utils import ServiceCheckResult
 from cmk.utils.defines import short_service_state_name
+from cmk.utils.labels import HostLabelValueDict
 from cmk.utils.python_printer import PythonPrinter
 from cmk.utils.site import omd_site
 
@@ -74,11 +76,13 @@ from cmk.gui.watolib.services import (
     get_check_table,
     has_active_job,
     has_discovery_action_specific_permissions,
+    has_modification_specific_permissions,
     initial_discovery_result,
     perform_fix_all,
     perform_host_label_discovery,
     perform_service_discovery,
     StartDiscoveryRequest,
+    UpdateType,
 )
 from cmk.gui.watolib.utils import may_edit_ruleset
 
@@ -239,7 +243,9 @@ class AutomationServiceDiscoveryJob(AutomationCommand):
                 new_check_table.append(tuple(tmp_entry))
             fixed_data = (data[0], data[1], new_check_table, data[3])
             return PythonPrinter().pformat(fixed_data)
-        return execute_discovery_job(api_request).serialize()
+        return execute_discovery_job(api_request).serialize(
+            for_cmk_version=cmk_version.parse_check_mk_version(version)
+        )
 
 
 @page_registry.register_page("ajax_service_discovery")
@@ -250,7 +256,9 @@ class ModeAjaxServiceDiscovery(AjaxPage):
 
         api_request: AjaxDiscoveryRequest = self.webapi_request()
         html.request.del_var("request")  # Do not add this to URLs constructed later
-        update_target = api_request.get("update_target", None)
+        update_target = (
+            None if (raw := api_request.get("update_target", None)) is None else UpdateType(raw)
+        )
         update_source = api_request.get("update_source", None)
         api_request.setdefault("update_services", [])
         update_services = api_request.get("update_services", [])
@@ -274,7 +282,7 @@ class ModeAjaxServiceDiscovery(AjaxPage):
 
         # If the user has the wrong permissions, then we still return a discovery result
         # which is different from the REST API behavior.
-        if not has_discovery_action_specific_permissions(discovery_options.action):
+        if not has_discovery_action_specific_permissions(discovery_options.action, update_target):
             discovery_options = discovery_options._replace(action=DiscoveryAction.NONE)
 
         discovery_result = self._perform_discovery_action(
@@ -282,7 +290,7 @@ class ModeAjaxServiceDiscovery(AjaxPage):
             discovery_options=discovery_options,
             previous_discovery_result=previous_discovery_result,
             update_source=update_source,
-            update_target=update_target,
+            update_target=None if update_target is None else update_target.value,
             update_services=update_services,
         )
 
@@ -295,6 +303,7 @@ class ModeAjaxServiceDiscovery(AjaxPage):
                 new_labels=previous_discovery_result.new_labels,
                 vanished_labels=previous_discovery_result.vanished_labels,
                 changed_labels=previous_discovery_result.changed_labels,
+                host_labels_by_host=previous_discovery_result.host_labels_by_host,
             )
 
         show_checkboxes = user.discovery_checkboxes
@@ -331,7 +340,9 @@ class ModeAjaxServiceDiscovery(AjaxPage):
             "pending_changes_info": get_pending_changes_info(),
             "pending_changes_tooltip": get_pending_changes_tooltip(),
             "discovery_options": discovery_options._asdict(),
-            "discovery_result": discovery_result.serialize(),
+            "discovery_result": discovery_result.serialize(
+                for_cmk_version=cmk_version.parse_check_mk_version(cmk_version.__version__),
+            ),
         }
 
     def _perform_discovery_action(
@@ -550,8 +561,8 @@ class DiscoveryPageRenderer:
         table,
         discovery_result: DiscoveryResult,
     ) -> None:
-        active_host_labels: Dict[str, Dict[str, str]] = {}
-        changed_host_labels: Dict[str, Dict[str, str]] = {}
+        active_host_labels: Dict[str, HostLabelValueDict] = {}
+        changed_host_labels: Dict[str, HostLabelValueDict] = {}
 
         for label_id, label in discovery_result.host_labels.items():
             # For visualization of the changed host labels the old value and the new value
@@ -632,25 +643,8 @@ class DiscoveryPageRenderer:
         return
 
     def _show_discovery_details(self, discovery_result: DiscoveryResult, api_request: dict) -> None:
-        if not discovery_result.check_table and self._is_active(discovery_result):
-            return
-
-        if not discovery_result.check_table and self._host.is_cluster():
-            html.br()
-            url = watolib.folder_preserving_link(
-                [("mode", "edit_ruleset"), ("varname", "clustered_services")]
-            )
-            html.show_message(
-                _(
-                    "Could not find any service for your cluster. You first need to "
-                    "specify which services of your nodes shal be added to the "
-                    'cluster. This is done using the <a href="%s">%s</a> ruleset.'
-                )
-                % (url, _("Clustered services"))
-            )
-            return
-
         if not discovery_result.check_table:
+            self._show_discovery_empty(discovery_result, api_request)
             return
 
         # We currently don't get correct information from cmk.base (the data sources). Better
@@ -692,8 +686,45 @@ class DiscoveryPageRenderer:
             html.hidden_fields()
             html.end_form()
 
+    def _show_discovery_empty(self, discovery_result: DiscoveryResult, api_request: dict) -> None:
+        if self._is_active(discovery_result):
+            return
+
+        if self._host.is_cluster():
+            html.br()
+            url = watolib.folder_preserving_link(
+                [("mode", "edit_ruleset"), ("varname", "clustered_services")]
+            )
+            html.show_message(
+                _(
+                    "Could not find any service for your cluster. You first need to "
+                    "specify which services of your nodes shal be added to the "
+                    'cluster. This is done using the <a href="%s">%s</a> ruleset.'
+                )
+                % (url, _("Clustered services"))
+            )
+            return
+
+        if self._is_first_attempt(api_request):
+            html.show_message(
+                _("Could not find any service for this host. You might need to trigger a rescan.")
+            )
+            return
+
+        html.show_message(
+            _(
+                "No services found. "
+                "If you expect this host to have (vanished) services, it probably means that one "
+                "of the configured data sources is not operating as expected. "
+                "Take a look at the <i>Check_MK</i> service to see what is wrong."
+            )
+        )
+
     def _is_active(self, discovery_result):
         return discovery_result.job_status["is_active"]
+
+    def _is_first_attempt(self, api_request: dict) -> bool:
+        return api_request["discovery_result"] is None
 
     def _group_check_table_by_state(
         self, check_table: Iterable[CheckPreviewEntry]
@@ -834,27 +865,28 @@ class DiscoveryPageRenderer:
             return
 
         if table_source == DiscoveryState.MONITORED:
-            if user.may("wato.service_discovery_to_undecided"):
+            if has_modification_specific_permissions(UpdateType.UNDECIDED):
                 self._enable_bulk_button(table_source, DiscoveryState.UNDECIDED)
-            if user.may("wato.service_discovery_to_ignored"):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 self._enable_bulk_button(table_source, DiscoveryState.IGNORED)
 
         elif table_source == DiscoveryState.IGNORED:
-            if user.may("wato.service_discovery_to_monitored"):
-                self._enable_bulk_button(table_source, DiscoveryState.MONITORED)
-            if user.may("wato.service_discovery_to_undecided"):
-                self._enable_bulk_button(table_source, DiscoveryState.UNDECIDED)
+            if may_edit_ruleset("ignored_services"):
+                if has_modification_specific_permissions(UpdateType.MONITORED):
+                    self._enable_bulk_button(table_source, DiscoveryState.MONITORED)
+                if has_modification_specific_permissions(UpdateType.UNDECIDED):
+                    self._enable_bulk_button(table_source, DiscoveryState.UNDECIDED)
 
         elif table_source == DiscoveryState.VANISHED:
-            if user.may("wato.service_discovery_to_removed"):
+            if has_modification_specific_permissions(UpdateType.REMOVED):
                 self._enable_bulk_button(table_source, DiscoveryState.REMOVED)
-            if user.may("wato.service_discovery_to_ignored"):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 self._enable_bulk_button(table_source, DiscoveryState.IGNORED)
 
         elif table_source == DiscoveryState.UNDECIDED:
-            if user.may("wato.service_discovery_to_monitored"):
+            if has_modification_specific_permissions(UpdateType.MONITORED):
                 self._enable_bulk_button(table_source, DiscoveryState.MONITORED)
-            if user.may("wato.service_discovery_to_ignored"):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 self._enable_bulk_button(table_source, DiscoveryState.IGNORED)
 
     def _enable_bulk_button(self, source, target):
@@ -1027,7 +1059,7 @@ class DiscoveryPageRenderer:
 
         num_buttons = 0
         if entry.check_source == DiscoveryState.MONITORED:
-            if user.may("wato.service_discovery_to_undecided"):
+            if has_modification_specific_permissions(UpdateType.UNDECIDED):
                 num_buttons += self._icon_button(
                     entry.check_source,
                     checkbox_name,
@@ -1035,9 +1067,7 @@ class DiscoveryPageRenderer:
                     "undecided",
                     button_classes,
                 )
-            if may_edit_ruleset("ignored_services") and user.may(
-                "wato.service_discovery_to_ignored"
-            ):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 num_buttons += self._icon_button(
                     entry.check_source,
                     checkbox_name,
@@ -1047,34 +1077,33 @@ class DiscoveryPageRenderer:
                 )
 
         elif entry.check_source == DiscoveryState.IGNORED:
-            if may_edit_ruleset("ignored_services"):
-                if user.may("wato.service_discovery_to_monitored"):
-                    num_buttons += self._icon_button(
-                        entry.check_source,
-                        checkbox_name,
-                        DiscoveryState.MONITORED,
-                        "monitored",
-                        button_classes,
-                    )
-                if user.may("wato.service_discovery_to_ignored"):
-                    num_buttons += self._icon_button(
-                        entry.check_source,
-                        checkbox_name,
-                        DiscoveryState.UNDECIDED,
-                        "undecided",
-                        button_classes,
-                    )
-                num_buttons += self._disabled_services_button(entry.description)
+            if may_edit_ruleset("ignored_services") and has_modification_specific_permissions(
+                UpdateType.MONITORED
+            ):
+                num_buttons += self._icon_button(
+                    DiscoveryState.IGNORED,
+                    checkbox_name,
+                    DiscoveryState.MONITORED,
+                    "monitored",
+                    button_classes,
+                )
+            if has_modification_specific_permissions(UpdateType.IGNORED):
+                num_buttons += self._icon_button(
+                    DiscoveryState.IGNORED,
+                    checkbox_name,
+                    DiscoveryState.UNDECIDED,
+                    "undecided",
+                    button_classes,
+                )
+            num_buttons += self._disabled_services_button(entry.description)
 
         elif entry.check_source == DiscoveryState.VANISHED:
-            if user.may("wato.service_discovery_to_removed"):
+            if has_modification_specific_permissions(UpdateType.REMOVED):
                 num_buttons += self._icon_button_removed(
                     entry.check_source, checkbox_name, button_classes
                 )
 
-            if may_edit_ruleset("ignored_services") and user.may(
-                "wato.service_discovery_to_ignored"
-            ):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 num_buttons += self._icon_button(
                     entry.check_source,
                     checkbox_name,
@@ -1084,7 +1113,7 @@ class DiscoveryPageRenderer:
                 )
 
         elif entry.check_source == DiscoveryState.UNDECIDED:
-            if user.may("wato.service_discovery_to_monitored"):
+            if has_modification_specific_permissions(UpdateType.MONITORED):
                 num_buttons += self._icon_button(
                     entry.check_source,
                     checkbox_name,
@@ -1092,9 +1121,7 @@ class DiscoveryPageRenderer:
                     "monitored",
                     button_classes,
                 )
-            if may_edit_ruleset("ignored_services") and user.may(
-                "wato.service_discovery_to_ignored"
-            ):
+            if has_modification_specific_permissions(UpdateType.IGNORED):
                 num_buttons += self._icon_button(
                     entry.check_source,
                     checkbox_name,

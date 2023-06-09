@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -155,7 +155,17 @@ def is_registered_inventory_plugin(inventory_plugin_name: InventoryPluginName) -
 
 
 def is_registered_section_plugin(section_name: SectionName) -> bool:
-    return section_name in registered_agent_sections or section_name in registered_snmp_sections
+    return is_registered_snmp_section_plugin(section_name) or is_registered_agent_section_plugin(
+        section_name
+    )
+
+
+def is_registered_agent_section_plugin(section_name: SectionName) -> bool:
+    return section_name in registered_agent_sections
+
+
+def is_stored_ruleset(ruleset_name: RuleSetName) -> bool:
+    return ruleset_name in stored_rulesets
 
 
 def iter_all_agent_sections() -> Iterable[AgentSectionPlugin]:

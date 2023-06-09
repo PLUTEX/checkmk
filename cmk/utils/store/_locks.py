@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """This module cares about Check_MK's file storage accessing. Most important
@@ -144,33 +144,30 @@ def aquire_lock(path: Union[Path, str], blocking: bool = True) -> None:
         return  # No recursive locking
 
     logger.debug("Trying to acquire lock on %s", path)
-
     # Create file (and base dir) for locking if not existent yet
     path.parent.mkdir(mode=0o770, exist_ok=True, parents=True)
+    flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
 
-    fd = os.open(str(path), os.O_RDONLY | os.O_CREAT, 0o660)
-
-    # Handle the case where the file has been renamed in the meantime
     while True:
-        flags = fcntl.LOCK_EX
-        if not blocking:
-            flags |= fcntl.LOCK_NB
-
-        try:
+        with _open_lock_file(path) as fd:
             fcntl.flock(fd, flags)
-        except IOError:
+            # Handle the case where the file has been renamed in the meantime
+            with _open_lock_file(path) as fd_new:
+                if os.path.sameopenfile(fd, fd_new):
+                    _set_lock(str(path), os.dup(fd))
+                    logger.debug("Got lock on %s", path)
+                    return
+
+
+@contextmanager
+def _open_lock_file(path: os.PathLike) -> Iterator[int]:
+    fd = None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o660)
+        yield fd
+    finally:
+        if fd is not None:
             os.close(fd)
-            raise
-
-        fd_new = os.open(str(path), os.O_RDONLY | os.O_CREAT, 0o660)
-        if os.path.sameopenfile(fd, fd_new):
-            os.close(fd_new)
-            break
-        os.close(fd)
-        fd = fd_new
-
-    _set_lock(str(path), fd)  # pylint: disable=no-value-for-parameter
-    logger.debug("Got lock on %s", path)
 
 
 @contextmanager
@@ -197,18 +194,19 @@ def release_lock(path: Union[Path, str]) -> None:
 
     if not have_lock(path):
         return  # no unlocking needed
-    logger.debug("Releasing lock on %s", path)
 
-    fd = _get_lock(str(path))
-    if fd is None:
+    logger.debug("Releasing lock on %s", path)
+    if (fd := _get_lock(str(path))) is None:
         return
+
     try:
         os.close(fd)
     except OSError as e:
         if e.errno != errno.EBADF:  # Bad file number
             raise
-    _del_lock(str(path))
-    logger.debug("Released lock on %s", path)
+    finally:
+        _del_lock(str(path))
+        logger.debug("Released lock on %s", path)
 
 
 def have_lock(path: Union[str, Path]) -> bool:

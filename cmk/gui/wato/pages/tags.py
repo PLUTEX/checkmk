@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Manage the variable config.wato_host_tags -> The set of tags to be assigned
@@ -642,7 +642,7 @@ class ModeEditAuxtag(ABCEditTagMode):
         super().__init__()
 
         if self._new:
-            self._aux_tag = cmk.utils.tags.AuxTag(tag_id="", title="", topic=None)
+            self._aux_tag = cmk.utils.tags.AuxTag(tag_id="", title="", topic=None, help=None)
         else:
             self._aux_tag = self._tag_config.aux_tag_list.get_aux_tag(self._id)
 
@@ -693,7 +693,7 @@ class ModeEditAuxtag(ABCEditTagMode):
     def page(self):
         html.begin_form("aux_tag")
 
-        self._valuespec().render_input("aux_tag", self._aux_tag.get_dict_format())
+        self._valuespec().render_input("aux_tag", self._aux_tag.to_config())
 
         forms.end()
         html.show_localization_hint()
@@ -948,7 +948,7 @@ def _rename_tags_after_confirmation(
         with output_funnel.plugged():
             html.write_text(
                 _(
-                    "Hosts where this tag group is explicitely set "
+                    "Hosts where this tag group is explicitly set "
                     "and that are effected by the change"
                 )
                 + ":"

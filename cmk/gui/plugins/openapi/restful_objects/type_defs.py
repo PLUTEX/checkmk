@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 from typing import (
@@ -20,6 +20,8 @@ from typing import (
 
 from marshmallow import fields, Schema
 
+from cmk.utils.type_defs import HTTPMethod
+
 URL = str
 
 DomainType = Literal[
@@ -27,6 +29,7 @@ DomainType = Literal[
     "activation_run",
     "agent",
     "agent_binary",
+    "aux_tag",
     "bi_aggregation",
     "bi_pack",
     "bi_rule",
@@ -34,6 +37,7 @@ DomainType = Literal[
     "dcd",
     "discovery_run",
     "downtime",
+    "event_console",
     "folder_config",
     "host",
     "host_config",
@@ -67,6 +71,7 @@ CmkEndpointName = Literal[
     "cmk/bulk_discovery",
     "cmk/bulk_update",
     "cmk/create",
+    "cmk/create_aux_tag",
     "cmk/create_host",
     "cmk/create_service",
     "cmk/create_cluster",
@@ -107,6 +112,9 @@ CmkEndpointName = Literal[
     "cmk/service.move-ignored",
     "cmk/service.bulk-acknowledge",
     "cmk/link_uuid",
+    "cmk/update_and_acknowledge",
+    "cmk/change_state",
+    "cmk/update",
 ]
 
 RestfulEndpointName = Literal[
@@ -124,6 +132,8 @@ RestfulEndpointName = Literal[
     ".../choice",  # takes params
     ".../clear",
     ".../collection",
+    ".../collection_update_and_acknowledge",
+    ".../collection_change_state",
     ".../default",
     ".../delete",
     ".../details",  # takes params
@@ -146,8 +156,6 @@ RestfulEndpointName = Literal[
 ]  # yapf: disable
 
 LinkRelation = Union[CmkEndpointName, RestfulEndpointName]
-
-HTTPMethod = Literal["get", "put", "post", "delete"]
 
 PropertyFormat = Literal[
     # String values

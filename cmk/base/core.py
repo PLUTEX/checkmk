@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """All core related things like direct communication with the running core"""
@@ -60,10 +60,15 @@ def do_restart(
     core: MonitoringCore,
     action: CoreAction = CoreAction.RESTART,
     hosts_to_update: HostsToUpdate = None,
+    skip_config_locking_in_bakery: bool = False,
 ) -> None:
     try:
         with activation_lock(mode=config.restart_locking):
-            core_config.do_create_config(core, hosts_to_update=hosts_to_update)
+            core_config.do_create_config(
+                core,
+                hosts_to_update=hosts_to_update,
+                skip_config_locking_in_bakery=skip_config_locking_in_bakery,
+            )
             do_core_action(action)
 
     except Exception as e:

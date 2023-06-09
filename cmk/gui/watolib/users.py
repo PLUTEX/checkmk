@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
+from typing import cast, Optional
+
+import cmk.utils.version as cmk_version
+from cmk.utils.crypto.password import Password, PasswordPolicy
 
 import cmk.gui.mkeventd
 import cmk.gui.userdb as userdb
@@ -11,7 +15,7 @@ from cmk.gui.exceptions import MKUserError
 from cmk.gui.globals import config, user
 from cmk.gui.i18n import _
 from cmk.gui.plugins.userdb.utils import add_internal_attributes
-from cmk.gui.type_defs import UserId
+from cmk.gui.type_defs import UserId, UserSpec
 from cmk.gui.valuespec import (
     Age,
     Alternative,
@@ -37,6 +41,27 @@ from cmk.gui.watolib.user_scripts import (
     user_script_choices,
     user_script_title,
 )
+
+if not cmk_version.is_raw_edition():
+    from cmk.gui.cee.plugins.watolib.dcd import (  # pylint: disable=no-name-in-module
+        ConfigDomainDCD,
+        used_dcd_rest_api_user,
+    )
+
+    def _add_dcd_change(affected_user: str) -> None:
+        add_change(
+            "edit-dcd-user",
+            _("User %s of DCD connection was modified") % affected_user,
+            domains=[ConfigDomainDCD],
+        )
+
+else:
+    # Stub needed for non enterprise edition
+    def used_dcd_rest_api_user() -> Optional[str]:
+        return None
+
+    def _add_dcd_change(affected_user: str) -> None:
+        return None
 
 
 def delete_users(users_to_delete):
@@ -101,13 +126,36 @@ def edit_users(changed_users):
 
     if new_users_info:
         add_change("edit-users", _("Created new users: %s") % ", ".join(new_users_info))
+
     if modified_users_info:
-        add_change("edit-users", _("Modified users: %s") % ", ".join(modified_users_info))
+        add_change(
+            "edit-users",
+            _("Modified users: %s") % ", ".join(modified_users_info),
+        )
+        if (
+            affected_user := used_dcd_rest_api_user()
+        ) is not None and affected_user in modified_users_info:
+            _add_dcd_change(affected_user)
 
     userdb.save_users(all_users)
 
 
-def make_user_audit_log_object(attributes):
+def remove_custom_attribute_from_all_users(custom_attribute_name: str) -> None:
+    edit_users(
+        {
+            user_id: {
+                "attributes": cast(
+                    UserSpec,
+                    {k: v for k, v in settings.items() if k != custom_attribute_name},
+                ),
+                "is_new_user": False,
+            }
+            for user_id, settings in userdb.load_users(lock=True).items()
+        }
+    )
+
+
+def make_user_audit_log_object(attributes: UserSpec) -> UserSpec:
     """The resulting object is used for building object diffs"""
     obj = attributes.copy()
 
@@ -137,6 +185,12 @@ def _validate_user_attributes(all_users, user_id, user_attrs, is_new_user=True):
     if is_new_user:
         if user_id in all_users:
             raise MKUserError("user_id", _("This username is already being used by another user."))
+        if len(bytes(user_id, encoding="utf-8")) > 255:
+            # Note: starting in version 2.2 this check can happen in the UserId type, but here
+            # UserId is just a NewType.
+            # Also note that we cannot use maxlen of the UserID ValueSpec here because we're
+            # interested in the number of bytes, while the VS looks at characters.
+            raise MKUserError("user_id", _("The username is too long."))
         vs_user_id = UserID(allow_empty=False)
         vs_user_id.validate_value(user_id, "user_id")
     else:
@@ -155,17 +209,14 @@ def _validate_user_attributes(all_users, user_id, user_attrs, is_new_user=True):
     if user_id == user.id and locked:
         raise MKUserError("locked", _("You cannot lock your own account!"))
 
-    # Authentication: Password or Secret
+    # Automation Secret
+    # Note: if a password is used it is verified before this; we only know the hash here
     if "automation_secret" in user_attrs:
         secret = user_attrs["automation_secret"]
         if len(secret) < 10:
             raise MKUserError(
                 "secret", _("Please specify a secret of at least 10 characters length.")
             )
-    else:
-        password = user_attrs.get("password")
-        if password:
-            verify_password_policy(password)
 
     # Email
     email = user_attrs.get("email")
@@ -246,12 +297,7 @@ def get_vs_user_idle_timeout():
                 title=_("Disable the login timeout"),
                 totext="",
             ),
-            Age(
-                title=_("Set an individual idle timeout"),
-                display=["minutes", "hours", "days"],
-                minvalue=60,
-                default_value=3600,
-            ),
+            vs_idle_timeout_duration(),
         ],
         orientation="horizontal",
     )
@@ -460,6 +506,15 @@ def get_vs_flexible_notifications():
     )
 
 
+def vs_idle_timeout_duration() -> Age:
+    return Age(
+        title=_("Set an individual idle timeout"),
+        display=["minutes", "hours", "days"],
+        minvalue=60,
+        default_value=5400,
+    )
+
+
 def notification_script_title(name):
     return user_script_title("notifications", name)
 
@@ -476,33 +531,22 @@ def notification_script_choices():
     return choices
 
 
-def verify_password_policy(password):
+def verify_password_policy(password: Password) -> None:
     min_len = config.password_policy.get("min_length")
-    if min_len and len(password) < min_len:
+    num_groups = config.password_policy.get("num_groups")
+
+    result = password.verify_policy(PasswordPolicy(min_len, num_groups))
+    if result == PasswordPolicy.Result.TooShort:
         raise MKUserError(
             "password",
             _("The given password is too short. It must have at least %d characters.") % min_len,
         )
-
-    num_groups = config.password_policy.get("num_groups")
-    if num_groups:
-        groups = {}
-        for c in password:
-            if c in "abcdefghijklmnopqrstuvwxyz":
-                groups["lcase"] = 1
-            elif c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-                groups["ucase"] = 1
-            elif c in "0123456789":
-                groups["numbers"] = 1
-            else:
-                groups["special"] = 1
-
-        if sum(groups.values()) < num_groups:
-            raise MKUserError(
-                "password",
-                _(
-                    "The password does not use enough character groups. You need to "
-                    "set a password which uses at least %d of them."
-                )
-                % num_groups,
+    if result == PasswordPolicy.Result.TooSimple:
+        raise MKUserError(
+            "password",
+            _(
+                "The password does not use enough character groups. You need to "
+                "set a password which uses at least %d of them."
             )
+            % num_groups,
+        )

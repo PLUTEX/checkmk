@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """The rulespecs are the ruleset specifications registered to WATO."""
@@ -32,7 +32,7 @@ from cmk.gui.valuespec import (
     ValueSpec,
     ValueSpecText,
 )
-from cmk.gui.watolib.check_mk_automations import get_check_information
+from cmk.gui.watolib.check_mk_automations import get_check_information_cached
 from cmk.gui.watolib.main_menu import ABCMainModule, ModuleRegistry
 from cmk.gui.watolib.search import (
     ABCMatchItemGenerator,
@@ -1121,9 +1121,9 @@ class CheckTypeGroupSelection(ElementSelection):
         self._checkgroup = checkgroup
 
     def get_elements(self):
-        checks = get_check_information().plugin_infos
+        checks = get_check_information_cached()
         elements = {
-            cn: "%s - %s" % (cn, c["title"])
+            str(cn): "%s - %s" % (cn, c["title"])
             for (cn, c) in checks.items()
             if c.get("group") == self._checkgroup
         }

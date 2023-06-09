@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """
@@ -11,13 +11,13 @@ import argparse
 import datetime
 import json
 import logging
+import re
 import string
 import sys
-import time
 from multiprocessing import Lock, Process, Queue
 from pathlib import Path
 from queue import Empty as QueueEmpty
-from typing import Any, List, Mapping, Sequence, Tuple
+from typing import Any, List, Mapping, Optional, Sequence, Tuple, Type
 
 import adal  # type: ignore[import] # pylint: disable=import-error
 import requests
@@ -25,7 +25,7 @@ import requests
 import cmk.utils.password_store
 from cmk.utils.paths import tmp_dir
 
-from cmk.special_agents.utils import DataCache, get_seconds_since_midnight, vcrtrace
+from cmk.special_agents.utils import DataCache, vcrtrace
 
 Args = argparse.Namespace
 GroupLabels = Mapping[str, Mapping[str, str]]
@@ -54,10 +54,15 @@ METRICS_SELECTED = {
     ],
     "Microsoft.Storage/storageAccounts": [
         (
-            "UsedCapacity,Ingress,Egress,Transactions,"
-            "SuccessServerLatency,SuccessE2ELatency,Availability",
+            "UsedCapacity,Ingress,Egress,Transactions",
             "PT1H",
             "total",
+            None,
+        ),
+        (
+            "SuccessServerLatency,SuccessE2ELatency,Availability",
+            "PT1H",
+            "average",
             None,
         ),
     ],
@@ -188,6 +193,31 @@ class ApiErrorMissingData(ApiError):
     pass
 
 
+class NoConsumptionAPIError(ApiError):
+    pass
+
+
+class ApiErrorAuthorizationRequestDenied(ApiError):
+    pass
+
+
+class ApiErrorFactory:
+    _ERROR_CLASS_BY_CODE: dict[str, Type[ApiError]] = {
+        "Authorization_RequestDenied": ApiErrorAuthorizationRequestDenied
+    }
+
+    # Setting the type of `error_data` to Any because it is data fetched remotely and we want to
+    # handle any type of data in this method
+    @staticmethod
+    def error_from_data(error_data: Any) -> ApiError:
+        try:
+            error_code = error_data["code"]
+            error_cls = ApiErrorFactory._ERROR_CLASS_BY_CODE.get(error_code, ApiError)
+            return error_cls(error_data.get("message", error_data))
+        except Exception:
+            return ApiError(error_data)
+
+
 class BaseApiClient(abc.ABC):
     AUTHORITY = "https://login.microsoftonline.com"
 
@@ -237,7 +267,7 @@ class BaseApiClient(abc.ABC):
         rows = self._lookup(data, "rows")
 
         next_link = data.get("nextLink")
-        while next_link is not None:
+        while next_link:
             new_json_data = self._request_json_from_url("POST", next_link, body=body)
             data = self._lookup(new_json_data, "properties")
             rows += self._lookup(data, "rows")
@@ -294,7 +324,7 @@ class BaseApiClient(abc.ABC):
             return json_data[key]
         except KeyError:
             error = json_data.get("error", json_data)
-            raise ApiError(error.get("message", json_data))
+            raise ApiErrorFactory.error_from_data(error)
 
 
 class GraphApiClient(BaseApiClient):
@@ -336,15 +366,23 @@ class MgmtApiClient(BaseApiClient):
         super().__init__(base_url)
 
     @staticmethod
-    def _get_available_metrics_from_exception(desired_names, api_error):
-        if not (
-            api_error.message.startswith("Failed to find metric configuration for provider")
-            and "Valid metrics: " in api_error.message
-        ):
+    def _get_available_metrics_from_exception(
+        desired_names: str, api_error: ApiError, resource_id: str
+    ) -> Optional[str]:
+        error_message = api_error.args[0]
+        match = re.match(
+            r"Failed to find metric configuration for provider.*Valid metrics: ([\w,]*)",
+            error_message,
+        )
+        if not match:
+            raise api_error
+
+        available_names = match.groups()[0]
+        retry_names = set(desired_names.split(",")) & set(available_names.split(","))
+        if not retry_names:
+            LOGGER.debug("None of the expected metrics are available for resource %s", resource_id)
             return None
 
-        available_names = api_error.message.split("Valid metrics: ")[1]
-        retry_names = set(desired_names.split(",")) & set(available_names.split(","))
         return ",".join(sorted(retry_names))
 
     @property
@@ -395,11 +433,13 @@ class MgmtApiClient(BaseApiClient):
         try:
             return self._get(url, key="value", params=params)
         except ApiError as exc:
-            retry_names = self._get_available_metrics_from_exception(params["metricnames"], exc)
+            retry_names = self._get_available_metrics_from_exception(
+                params["metricnames"], exc, resource_id
+            )
             if retry_names:
                 params["metricnames"] = retry_names
                 return self._get(url, key="value", params=params)
-            raise
+            return []
 
 
 # The following *Config objects provide a Configuration instance as described in
@@ -448,7 +488,8 @@ class ExplicitConfig:
 
     def add_key(self, key, value):
         if key == "group":
-            self.current_group = self.groups.setdefault(value, GroupConfig(value))
+            group_name = value.lower()
+            self.current_group = self.groups.setdefault(group_name, GroupConfig(group_name))
             return
         if self.current_group is None:
             raise RuntimeError("missing arg: group=<name>")
@@ -457,7 +498,7 @@ class ExplicitConfig:
     def is_configured(self, resource):
         if self.fetchall:
             return True
-        group_config = self.groups.get(resource.info["group"])
+        group_config = self.groups.get(resource.info["group"].lower())
         if group_config is None:
             return False
         if group_config.fetchall:
@@ -557,15 +598,6 @@ class AzureSection(Section):
 class LabelsSection(Section):
     def __init__(self, piggytarget):
         super().__init__("labels", [piggytarget], separator=0, options=[])
-
-
-class UsageSection(Section):
-    def __init__(self, usage_details, piggytargets, cacheinfo):
-        options = ["cached(%d,%d)" % cacheinfo]
-        super().__init__(
-            "azure_%s" % usage_details.section, piggytargets, separator=124, options=options
-        )
-        self.add(usage_details.dumpinfo())
 
 
 class IssueCollecter:
@@ -728,74 +760,6 @@ class MetricCache(DataCache):
                 LOGGER.info(msg)
 
         return metrics
-
-
-class UsageClient(DataCache):
-    NO_CONSUPTION_API = (
-        "offer MS-AZR-0145P",
-        "offer MS-AZR-0146P",
-        "offer MS-AZR-159P",
-        "offer MS-AZR-0036P",
-        "offer MS-AZR-0143P",
-        "offer MS-AZR-0015P",
-        "offer MS-AZR-0144P",
-    )
-
-    def __init__(self, client, subscription, debug=False):
-        super().__init__(AZURE_CACHE_FILE_PATH, "%s-usage" % subscription, debug=debug)
-        self._client = client
-
-    @property
-    def cache_interval(self) -> int:
-        """Return the upper limit for allowed cache age.
-
-        Data is updated at midnight, so the cache should not be older than the day.
-        """
-        cache_interval = int(get_seconds_since_midnight(NOW))
-        LOGGER.debug("Maximal allowed age of usage data cache: %s sec", cache_interval)
-        return cache_interval
-
-    @classmethod
-    def offerid_has_no_consuption_api(cls, errmsg):
-        return any(s in errmsg for s in cls.NO_CONSUPTION_API)
-
-    def get_validity_from_args(self, *args: Any) -> bool:
-        return True
-
-    def get_live_data(self, *args: Any) -> Any:
-        LOGGER.debug("UsageClient: get live data")
-
-        try:
-            usages = self._client.usagedetails()
-        except ApiError as exc:
-            if self.offerid_has_no_consuption_api(exc.args[0]):
-                return []
-            raise
-        if not usages:  # do not save this in the cache!
-            raise ApiErrorMissingData("Azure API did not return any usage details")
-        LOGGER.debug("yesterdays usage details: %d", len(usages))
-
-        # add group info and name
-        for usage in usages:
-            usage["group"] = usage["properties"]["ResourceGroupName"]
-        return usages
-
-    def write_sections(self, monitored_groups):
-        try:
-            usage_data = self.get_data()
-        except ApiErrorMissingData if self.debug else Exception as exc:
-            LOGGER.warning("%s", exc)
-            write_exception_to_agent_info_section(exc, "Usage client")
-            # write an empty section to all groups:
-            AzureSection("usagedetails", monitored_groups + [""]).write(write_empty=True)
-            return
-
-        cacheinfo = (self.cache_timestamp or time.time(), self.cache_interval)
-        for usage_details in usage_data:
-            usage_details["type"] = "Microsoft.Consumption/usageDetails"
-            usage_resource = AzureResource(usage_details)
-            piggytargets = [g for g in usage_resource.piggytargets if g in monitored_groups] + [""]
-            UsageSection(usage_resource, piggytargets, cacheinfo).write()
 
 
 def write_section_ad(graph_client):
@@ -988,10 +952,80 @@ def main_graph_client(args, secret):
     try:
         graph_client.login(args.tenant, args.client, secret)
         write_section_ad(graph_client)
+    except ApiErrorAuthorizationRequestDenied as exc:
+        # We are not raising the exception in debug mode.
+        # Having no permissions for the graph API is a legit configuration
+        write_exception_to_agent_info_section(exc, "Graph client")
     except Exception as exc:
         if args.debug:
             raise
         write_exception_to_agent_info_section(exc, "Graph client")
+
+
+def get_usage_data(client: MgmtApiClient, args: Args) -> Sequence[object]:
+    NO_CONSUMPTION_API = (
+        "offer MS-AZR-0145P",
+        "offer MS-AZR-0146P",
+        "offer MS-AZR-159P",
+        "offer MS-AZR-0036P",
+        "offer MS-AZR-0143P",
+        "offer MS-AZR-0015P",
+        "offer MS-AZR-0144P",
+        "Customer does not have the privilege to see the cost",
+    )
+
+    LOGGER.debug("get usage details")
+
+    try:
+        usage_data = client.usagedetails()
+    except ApiError as exc:
+        if any(s in exc.args[0] for s in NO_CONSUMPTION_API):
+            raise NoConsumptionAPIError
+        raise
+
+    if not usage_data:
+        raise ApiErrorMissingData("Azure API did not return any usage details")
+
+    LOGGER.debug("yesterdays usage details: %d", len(usage_data))
+
+    for usage in usage_data:
+        usage["type"] = "Microsoft.Consumption/usageDetails"
+        usage["group"] = usage["properties"]["ResourceGroupName"]
+
+    return usage_data
+
+
+def write_usage_section(
+    usage_data: Sequence[object],
+    monitored_groups: list[str],
+) -> None:
+    if not usage_data:
+        AzureSection("usagedetails", monitored_groups + [""]).write(write_empty=True)
+
+    for usage in usage_data:
+        usage_resource = AzureResource(usage)
+        piggytargets = [g for g in usage_resource.piggytargets if g in monitored_groups] + [""]
+
+        section = AzureSection(usage_resource.section, piggytargets)
+        section.add(usage_resource.dumpinfo())
+        section.write()
+
+
+def usage_details(mgmt_client: MgmtApiClient, monitored_groups: list[str], args: Args) -> None:
+    try:
+        usage_section = get_usage_data(mgmt_client, args)
+        write_usage_section(usage_section, monitored_groups)
+
+    except NoConsumptionAPIError:
+        LOGGER.debug("Azure offer doesn't support querying the cost API")
+        return
+
+    except Exception as exc:
+        if args.debug:
+            raise
+        LOGGER.warning("%s", exc)
+        write_exception_to_agent_info_section(exc, "get_usage_data")
+        write_usage_section([], monitored_groups)
 
 
 def main_subscription(args, secret, selector, subscription):
@@ -1014,8 +1048,7 @@ def main_subscription(args, secret, selector, subscription):
     group_labels = get_group_labels(mgmt_client, monitored_groups)
     write_group_info(monitored_groups, monitored_resources, group_labels)
 
-    usage_client = UsageClient(mgmt_client, subscription, args.debug)
-    usage_client.write_sections(monitored_groups)
+    usage_details(mgmt_client, monitored_groups, args)
 
     func_args = ((mgmt_client, resource, group_labels, args) for resource in monitored_resources)
     mapper = get_mapper(args.debug, args.sequential, args.timeout)

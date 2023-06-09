@@ -79,6 +79,7 @@ powershell Write-Host "Building MSI..." -Foreground White
 powershell -ExecutionPolicy ByPass -File msb.ps1
 if not %errorlevel% == 0 powershell Write-Host "Failed Build" -Foreground Red && exit /b 7
 
+:: Signing Phase
 if not "%2" == "" (
 powershell Write-Host "Signing Executables" -Foreground White
 @call sign_windows_exe c:\common\store\%1 %2 %build_dir%\check_mk_service\x64\Release\check_mk_service64.exe

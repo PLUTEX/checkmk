@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -53,7 +53,7 @@ def merge_sections(
 
         # Quick workaround for enabled checker/fetcher mode. Will soon be replaced once the
         # livestatus status table has been updated.
-        helper_usage_cmk = float(status["helper_usage_cmk"] or "0") * 100
+        helper_usage_cmk = float(status.get("helper_usage_cmk", "0") or "0") * 100
         try:
             helper_usage_fetcher = float(status["helper_usage_fetcher"] or "0") * 100
             helper_usage_checker = float(status["helper_usage_checker"] or "0") * 100

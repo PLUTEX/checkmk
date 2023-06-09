@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Module to hold shared code for main module internals and the plugins"""
@@ -44,7 +44,7 @@ from cmk.utils.type_defs import ServiceName
 from cmk.utils.version import parse_check_mk_version
 
 import cmk.gui.sites as sites
-from cmk.gui.exceptions import MKGeneralException, MKUserError
+from cmk.gui.exceptions import http, MKGeneralException, MKHTTPException, MKUserError
 from cmk.gui.globals import config, g, html
 from cmk.gui.i18n import _
 from cmk.gui.log import logger
@@ -152,6 +152,10 @@ class TranslationInfo(TypedDict):
     name: str
     scale: float
     auto_graph: bool
+
+
+class MKCombinedGraphLimitExceededError(MKHTTPException):
+    status = http.HTTPStatus.BAD_REQUEST
 
 
 class AutomaticDict(OrderedDict[str, GraphTemplate]):
@@ -1107,9 +1111,14 @@ def rgb_color_to_hex_color(red: int, green: int, blue: int) -> str:
 
 
 def hex_color_to_rgb_color(color: str) -> Tuple[int, int, int]:
-    """Convert '#112233' to (17, 34, 51)"""
+    """Convert '#112233' or '#123' to (17, 34, 51)"""
+    full_color = color
+    if len(full_color) == 4:
+        # 3-digit hex codes means that both the values (RR, GG, BB) are the same for each component
+        # for instance '#ff00cc' can also be written like '#f0c'
+        full_color = "#" + full_color[1] * 2 + full_color[2] * 2 + full_color[3] * 2
     try:
-        return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+        return int(full_color[1:3], 16), int(full_color[3:5], 16), int(full_color[5:7], 16)
     except Exception:
         raise MKGeneralException(_("Invalid color specification '%s'") % color)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -30,7 +30,7 @@ def _mk_user_obj(username: str, password: str, automation: bool, role: str):
         username: {
             "attributes": {
                 "alias": "Test user",
-                "email": "test_user_%s@tribe29.com" % username,
+                "email": "test_user_%s@checkmk.com" % username,
                 "password": precomputed_hashes[password],
                 "notification_method": "email",
                 "roles": [role],
@@ -70,7 +70,7 @@ def create_and_destroy_user(
                     "alias": "Test user",
                     "contactgroups": ["all"],
                     "disable_notifications": {},
-                    "email": "test_user_%s@tribe29.com" % username,
+                    "email": "test_user_%s@checkmk.com" % username,
                     "fallback_contact": False,
                     "force_authuser": False,
                     "locked": False,

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -125,7 +125,7 @@ section_openbsd_mem() {
 # shellcheck disable=SC2039 # In POSIX sh, set flag -A is undefined.
 section_misc_sections() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p16"
+    echo "Version: 2.1.0p29"
     echo "AgentOS: openbsd"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: $MK_CONFDIR"
@@ -139,8 +139,7 @@ section_misc_sections() {
 
     # processes including username, without kernel processes
     echo '<<<ps>>>'
-    COLUMNS=10000
-    ps ax -o user,vsz,rss,pcpu,command | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4) /'
+    ps ax -ww -o user,vsz,rss,pcpu,command | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4) /'
 
     echo '<<<cpu>>>'
     echo "$(sysctl -n vm.loadavg | tr -d '{}') $(top -b -n 1 | grep -E '^[0-9]+ processes' | awk '{ print $3"/"$1 }') $(sysctl -n hw.ncpu)"
@@ -289,9 +288,10 @@ run_mrpe_plugins() {
         # We suppress it here for compatibility (curretly backslashes e.g. before spaces are dropped).
         # Since escaping of field seperators is not relevant when reading into one variable, we probably
         # would have wanted "read -r".
-        # shellcheck disable=SC2162
+        # shellcheck disable=SC2162,SC2001
         grep -Ev '^[[:space:]]*($|#)' "$MK_CONFDIR/mrpe.cfg" |
-            while read descr cmdline; do
+            while read descr rest; do
+                cmdline=$(echo "$rest" | sed -e 's/^([a-zA-Z:=[0-9]*]*) //g')
                 PLUGIN=${cmdline%% *}
                 OUTPUT=$(eval "$cmdline")
                 printf "(%s) %s %s %s" "${PLUGIN##*/}" "$descr" "$?" "$OUTPUT" | tr \\n \\1

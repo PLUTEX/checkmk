@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """This module is meant to be used by components (e.g. active checks, notifications, bakelets)
@@ -152,6 +152,7 @@ def _load(store_path: Path) -> dict[str, str]:
 
 
 def extract(password_id: PasswordId) -> Optional[str]:
+    """Translate the password store reference to the actual password"""
     if not isinstance(password_id, tuple):
         return load().get(password_id)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -12,6 +12,7 @@ data structures to version independent data structured defined in schemata.api
 from __future__ import annotations
 
 import datetime
+import math
 import re
 from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Type, Union
 
@@ -22,54 +23,63 @@ from .schemata.api import Label, LabelName, LabelValue
 
 
 def parse_frac_prefix(value: str) -> float:
-    """Parses the string `value` with a suffix of 'm' or 'k' into a float.
+    """Parses and then rounds up to nearest millicore.
+
+    This is how it is done internally by the Kubernetes API server.
 
     Examples:
        >>> parse_frac_prefix("359m")
        0.359
        >>> parse_frac_prefix("4k")
        4000.0
+       >>> parse_frac_prefix("200Mi")
+       209715200.0
+       >>> parse_frac_prefix("1M")
+       1000000.0
     """
-
-    if value.endswith("m"):
-        return 0.001 * float(value[:-1])
-    if value.endswith("k"):
-        return 1e3 * float(value[:-1])
-    return float(value)
+    return math.ceil(1000 * _parse_quantity(value)) / 1000
 
 
 def parse_memory(value: str) -> float:
-    if value.endswith("Ki"):
-        return 1024**1 * float(value[:-2])
-    if value.endswith("Mi"):
-        return 1024**2 * float(value[:-2])
-    if value.endswith("Gi"):
-        return 1024**3 * float(value[:-2])
-    if value.endswith("Ti"):
-        return 1024**4 * float(value[:-2])
-    if value.endswith("Pi"):
-        return 1024**5 * float(value[:-2])
-    if value.endswith("Ei"):
-        return 1024**6 * float(value[:-2])
+    """Converts quantity to bytes, rounding up if necessary.
 
-    if value.endswith("K") or value.endswith("k"):
-        return 1e3 * float(value[:-1])
-    if value.endswith("M"):
-        return 1e6 * float(value[:-1])
-    if value.endswith("G"):
-        return 1e9 * float(value[:-1])
-    if value.endswith("T"):
-        return 1e12 * float(value[:-1])
-    if value.endswith("P"):
-        return 1e15 * float(value[:-1])
-    if value.endswith("E"):
-        return 1e18 * float(value[:-1])
+    millibytes are useless, but valid. This is because Kubernetes uses Quantity everywhere
+    https://github.com/kubernetes/kubernetes/issues/28741
+    Internally, Kubernetes rounds millibytes up to the nearest byte.
+    """
+    return math.ceil(_parse_quantity(value))
 
-    # millibytes are a useless, but valid option:
-    # https://github.com/kubernetes/kubernetes/issues/28741
-    if value.endswith("m"):
-        return 1e-3 * float(value[:-1])
 
+def parse_pod_number(value: str) -> int:
+    """Yes, pod numbers are described with quantities...
+    Examples:
+       >>> parse_pod_number("1k")
+       1000
+    """
+    return math.ceil(_parse_quantity(value))
+
+
+def _parse_quantity(value: str) -> float:
+    # Kubernetes uses a common field for any entry in resources, which it refers to as Quantity.
+    # See staging/src/k8s.io/apimachinery/pkg/api/resource/quantity.go
+    for unit, factor in [
+        ("Ki", 1024**1),
+        ("Mi", 1024**2),
+        ("Gi", 1024**3),
+        ("Ti", 1024**4),
+        ("Pi", 1024**5),
+        ("Ei", 1024**6),
+        ("K", 1e3),
+        ("k", 1e3),
+        ("M", 1e6),
+        ("G", 1e9),
+        ("T", 1e12),
+        ("P", 1e15),
+        ("E", 1e18),
+        ("m", 1e-3),
+    ]:
+        if value.endswith(unit):
+            return factor * float(value.removesuffix(unit))
     return float(value)
 
 
@@ -285,11 +295,16 @@ def pod_conditions(
     }
     result = []
     for condition in conditions:
+        last_transition_time = (
+            int(convert_to_timestamp(condition.last_transition_time))
+            if condition.last_transition_time
+            else None
+        )
         pod_condition = {
             "status": condition.status,
             "reason": condition.reason,
             "detail": condition.message,
-            "last_transition_time": int(convert_to_timestamp(condition.last_transition_time)),
+            "last_transition_time": last_transition_time,
         }
         if condition.type in condition_types:
             pod_condition["type"] = condition_types[condition.type]
@@ -373,13 +388,13 @@ def node_resources(capacity, allocatable) -> Dict[str, api.NodeResources]:
         resources["capacity"] = api.NodeResources(
             cpu=parse_frac_prefix(capacity.get("cpu", 0.0)),
             memory=parse_memory(capacity.get("memory", 0.0)),
-            pods=capacity.get("pods", 0),
+            pods=parse_pod_number(capacity.get("pods", 0)),
         )
     if allocatable:
         resources["allocatable"] = api.NodeResources(
             cpu=parse_frac_prefix(allocatable.get("cpu", 0.0)),
             memory=parse_memory(allocatable.get("memory", 0.0)),
-            pods=allocatable.get("pods", 0),
+            pods=parse_pod_number(allocatable.get("pods", 0)),
         )
     return resources
 

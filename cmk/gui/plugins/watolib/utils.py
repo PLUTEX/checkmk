@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -41,6 +41,14 @@ DomainRequests = Sequence[DomainRequest]
 
 
 class ABCConfigDomain(abc.ABC):
+    """
+    always_activate:
+        this attribute is used to determine if a config domain needs to be
+        activated regardless of the change type.
+        Use :func:`~cmk.gui.watolib.changes.add_change(domains=[])` to have more granular
+        control
+    """
+
     needs_sync = True
     needs_activation = True
     always_activate = False
@@ -92,7 +100,7 @@ class ABCConfigDomain(abc.ABC):
 
         try:
             with filename.open("rb") as f:
-                exec(f.read(), settings, settings)
+                exec(f.read(), {}, settings)
 
             return settings
 
@@ -295,14 +303,19 @@ class ConfigVariableRegistry(cmk.utils.plugin_registry.Registry[Type[ConfigVaria
 config_variable_registry = ConfigVariableRegistry()
 
 
-def filter_unknown_settings(settings):
-    removals: List[str] = []
-    for varname in list(settings.keys()):
-        if varname not in config_variable_registry:
-            removals.append(varname)
-    for removal in removals:
-        del settings[removal]
-    return settings
+# Some settings are handed over from the central site but are not registered in the
+# configuration domains since the user must not change it directly. They all belong
+# to the GUI config domain.
+UNREGISTERED_SETTINGS = {
+    "wato_enabled",
+    "userdb_automatic_sync",
+    "user_login",
+}
+
+
+def filter_unknown_settings(settings: Mapping[str, object]) -> dict[str, object]:
+    known_settings = set(config_variable_registry) | UNREGISTERED_SETTINGS
+    return {k: v for k, v in settings.items() if k in known_settings}
 
 
 def configvar_order():

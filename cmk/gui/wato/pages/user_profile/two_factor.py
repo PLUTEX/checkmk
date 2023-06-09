@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """The user can change own 2FA related settings on this page"""
@@ -458,9 +458,11 @@ class UserLoginTwoFactor(Page):
 
         html.open_a(href="https://checkmk.com")
         html.img(
-            src=theme.detect_icon_path(icon_name="logo", prefix="mk-"),
+            src=theme.detect_icon_path(
+                icon_name="login_logo" if theme.has_custom_logo("login_logo") else "checkmk_logo",
+                prefix="",
+            ),
             id_="logo",
-            class_="custom" if theme.has_custom_logo() else None,
         )
         html.close_a()
 

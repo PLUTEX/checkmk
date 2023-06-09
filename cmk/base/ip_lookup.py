@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -362,7 +362,7 @@ def update_dns_cache(
                     configured_ip_address=(
                         configured_ipv4_addresses
                         if family is socket.AF_INET
-                        else configured_ipv4_addresses
+                        else configured_ipv6_addresses
                     ).get(host_config.hostname),
                     simulation_mode=simulation_mode,
                     is_snmp_usewalk_host=host_config.is_usewalk_host and host_config.is_snmp_host,

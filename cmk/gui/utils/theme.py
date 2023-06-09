@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -104,13 +104,15 @@ class Theme:
     def base_dir(self) -> Path:
         return cmk.utils.paths.local_web_dir / "htdocs" / "themes" / self._theme
 
-    def has_custom_logo(self) -> bool:
+    def has_custom_logo(self, logo_name: str) -> bool:
         """Whether or not the current CME customer has a custom logo
 
-        CME snapshot sync copies the customer logo to themes/facelift/images/mk-logo.png.
+        CME snapshot sync copies the customer logo to themes/facelift/images/<logo_name>.png.
         See CMESnapshotDataCollector._update_customer_sidebar_top.
         """
-        return is_managed_edition() and self.base_dir().joinpath("images", "mk-logo.png").exists()
+        return (
+            is_managed_edition() and self.base_dir().joinpath("images", f"{logo_name}.png").exists()
+        )
 
 
 def theme_choices() -> List[Tuple[str, str]]:

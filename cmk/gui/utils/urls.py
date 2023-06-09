@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -189,12 +189,11 @@ class DocReference(Enum):
     DEVEL_CHECK_PLUGINS = "devel_check_plugins"
     DISTRIBUTED_MONITORING = "distributed_monitoring"
     GRAPHING_RRDS = "graphing#rrds"
-    # TODO: Check whether these anchors on the intro page exist and fix/remove broken ones.
-    INTRO_CREATING_FOLDERS = "intro#Creating folders"
-    INTRO_FOLDERS = "intro#folders"
-    INTRO_LINUX = "intro#linux"
-    INTRO_SERVICES = "intro#services"
-    INTRO_WELCOME = "intro_welcome"
+    INTRO_CREATING_FOLDERS = "intro_setup_monitor#folders"
+    INTRO_FOLDERS = "intro_setup_monitor#folders"
+    INTRO_LINUX = "intro_setup_monitor#linux"
+    INTRO_SERVICES = "intro_setup_monitor#services"
+    INTRO_WELCOME = "welcome"
     LDAP = "ldap"
     PIGGYBACK = "piggyback"
     REGEXES = "regexes"

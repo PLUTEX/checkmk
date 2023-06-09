@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -48,7 +48,7 @@ NAME_FIELD = {
     "name": String(
         description="A name used as an identifier. Can be of arbitrary (sensible) length.",
         example="pathname",
-        pattern="[a-zA-Z0-9][a-zA-Z0-9_-]+",
+        pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*",
     )
 }
 

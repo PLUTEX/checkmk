@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -16,11 +16,13 @@ import cmk.utils.paths
 import cmk.utils.store as store
 import cmk.utils.version as cmk_version
 from cmk.utils.license_usage.samples import (
+    hash_site_id,
     LicenseUsageExtensions,
     LicenseUsageHistoryDump,
     LicenseUsageSample,
     rot47,
 )
+from cmk.utils.site import omd_site
 
 import cmk.base.crash_reporting as crash_reporting
 
@@ -112,10 +114,21 @@ def _load_history_dump() -> LicenseUsageHistoryDump:
         history_filepath,
         default=b"{}",
     )
-    return LicenseUsageHistoryDump.deserialize(raw_history_dump)
+    return LicenseUsageHistoryDump.deserialize(raw_history_dump, hash_site_id(omd_site()))
 
 
 def _create_sample() -> Optional[LicenseUsageSample]:
+    sample_time = int(
+        datetime.utcnow()
+        .replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        .timestamp()
+    )
+
     hosts_counter = _get_hosts_counter()
     services_counter = _get_services_counter()
 
@@ -129,6 +142,7 @@ def _create_sample() -> Optional[LicenseUsageSample]:
 
     general_infos = cmk_version.get_general_version_infos()
     return LicenseUsageSample(
+        site_hash=hash_site_id(omd_site()),
         version=cmk_version.omd_version(),
         edition=general_infos["edition"],
         platform=general_infos["os"],
@@ -137,7 +151,7 @@ def _create_sample() -> Optional[LicenseUsageSample]:
         num_hosts_excluded=hosts_counter.excluded,
         num_services=services_counter.included,
         num_services_excluded=services_counter.excluded,
-        sample_time=int(time.time()),
+        sample_time=sample_time,
         timezone=time.localtime().tm_zone,
         extensions=_get_extensions(),
     )

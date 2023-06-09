@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -713,6 +713,15 @@ def get_last_chunk(log_chunks):
 #   '----------------------------------------------------------------------'
 
 nagios_illegal_chars = "`;~!$%^&*|'\"<>?,()="
+
+
+def logwatch_level_name(level):
+    return {
+        "O": "OK",
+        "W": "WARN",
+        "C": "CRIT",
+        "I": "IGNORE",
+    }[level]
 
 
 def level_name(level):

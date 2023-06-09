@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -20,6 +20,8 @@
 
 # A list of all task state can be found here:
 # http://msdn.microsoft.com/en-us/library/aa383604%28VS.85%29.aspx
+
+inventory_windows_tasks_rules = []
 
 factory_settings["windows_tasks"] = {}
 
@@ -47,7 +49,13 @@ def parse_windows_tasks(info):
 
 
 def inventory_windows_tasks(parsed):
-    return [(n, None) for n, v in parsed.items() if v.get("Scheduled Task State") != "Disabled"]
+    settings = host_extra_conf_merged(host_name(), inventory_windows_tasks_rules)
+    include_disabled_tasks = settings.get("disabled_tasks", False)
+    return [
+        (n, None)
+        for n, v in parsed.items()
+        if v.get("Scheduled Task State") != "Disabled" or include_disabled_tasks
+    ]
 
 
 # Code duplication with cmk/gui/plugins/wato/check_parameters/windows_tasks.py

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 import time
+from typing import Optional
+
+from cmk.utils.crypto.password import Password
 
 from cmk.gui import forms, login, userdb
 from cmk.gui.exceptions import MKUserError
@@ -29,14 +32,21 @@ class UserChangePasswordPage(ABCUserProfilePage):
         super().__init__("general.change_password")
 
     def _action(self) -> None:
+        def read_password_or_none(field: str) -> Optional[Password]:
+            # make a Password type only if the field has a non-"" value
+            # this is here because we don't have get_validated_type_input on 2.1 yet.
+            if pw := request.get_str_input(field):
+                return Password(pw)
+            return None
+
         assert user.id is not None
 
         users = userdb.load_users(lock=True)
         user_spec = users[user.id]
 
-        cur_password = request.get_str_input_mandatory("cur_password")
-        password = request.get_str_input_mandatory("password")
-        password2 = request.get_str_input_mandatory("password2", "")
+        cur_password = read_password_or_none("cur_password")
+        password = read_password_or_none("password")
+        password2 = read_password_or_none("password2")
 
         # Force change pw mode
         if not cur_password:
@@ -127,6 +137,8 @@ class UserChangePasswordPage(ABCUserProfilePage):
 
         forms.section(_("New Password Confirmation"))
         html.password_input("password2", autocomplete="new-password")
+
+        html.hidden_field("_origtarget", request.get_str_input("_origtarget"))
 
         forms.end()
         html.close_div()

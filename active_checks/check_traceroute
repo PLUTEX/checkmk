@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -50,8 +50,10 @@ import ast
 import getopt
 import ipaddress
 import os
+import re
 import subprocess
 import sys
+from collections.abc import Iterator
 
 
 class MissingValueError(Exception):
@@ -107,17 +109,8 @@ def _execute_traceroute(target, nodns, method, address_family):
 
 def check_traceroute(lines, routes):
     # find all visited routers
-    routers = set([])
+    routers = {router for line in lines[1:] for router in _extract_routers_from_line(line)}
     hops = len(lines[1:])
-    for line in lines[1:]:
-        parts = line.strip().split()
-        for part in parts:
-            try:
-                part = part.lstrip("(").rstrip(",").rstrip(")")
-                ipaddress.ip_interface(part)
-                routers.add(part)
-            except ValueError:
-                pass
 
     state = 0
     bad_routers = []
@@ -131,13 +124,28 @@ def check_traceroute(lines, routes):
             state = max(state, s)
             missing_routers.append("%s(%s)" % (route, "!" * s))
 
-    info_text = "%d hops, missing routers: %s, bad routers: %s" % (
+    info_text = f"%d hop{'' if hops == 1 else 's'}, missing routers: %s, bad routers: %s" % (
         hops,
         missing_routers and ", ".join(missing_routers) or "none",
         bad_routers and ", ".join(bad_routers) or "none",
     )
     perfdata = [("hops", hops)]
     return state, info_text, perfdata
+
+
+def _extract_routers_from_line(line: str) -> Iterator[str]:
+    # drop asterisks, which mean no response from the router at this hop
+    line = line.replace("*", "")
+    # drop round-trip times
+    line = re.sub(r"[0-9]+(\.[0-9]+)? ms", "", line)
+    yield from (
+        part.lstrip("(").rstrip(")")
+        for part in line.strip().split()
+        # drop numbering
+        [1:]
+        # drop additional information such as !X
+        if not part.startswith("!")
+    )
 
 
 def validate_ip_version(address_arg, ip_version_arg):
@@ -236,7 +244,7 @@ def main(args=None):
                 sys.exit(0)
 
         sto = _execute_traceroute(target_address, opt_nodns, opt_method, opt_address_family)
-        status, output, perfdata = check_traceroute(sto.split("\n"), route_params)
+        status, output, perfdata = check_traceroute(sto.splitlines(), route_params)
         info_text = output.strip() + "\n%s" % sto
         return status, info_text, perfdata
 

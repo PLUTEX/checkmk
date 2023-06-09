@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -8,13 +8,16 @@ import json
 import re
 import uuid
 from ast import literal_eval
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
+from tests.testlib.rest_api_client import RestApiClient
+
 from tests.unit.cmk.gui.conftest import WebTestAppForCMK
 
-from cmk.utils import paths
+from cmk.utils import paths, version
 
 from cmk.gui.fields import FOLDER_PATTERN, FolderField
 from cmk.gui.fields.utils import BaseSchema
@@ -68,7 +71,9 @@ def test_folder_schema(request_context):
     assert schema.load({"folder": "~"})["folder"]
 
 
-def test_openapi_folder_validation(aut_user_auth_wsgi_app: WebTestAppForCMK):
+def test_openapi_folder_validation(
+    aut_user_auth_wsgi_app: WebTestAppForCMK, api_client: RestApiClient
+) -> None:
     aut_user_auth_wsgi_app.call_method(
         "post",
         "/NO_SITE/check_mk/api/1.0/domain-types/folder_config/collections/all",
@@ -85,6 +90,12 @@ def test_openapi_folder_validation(aut_user_auth_wsgi_app: WebTestAppForCMK):
         status=400,
         headers={"Accept": "application/json"},
         content_type="application/json",
+    )
+    api_client.create_folder(
+        folder_name="\\",
+        title="test",
+        parent="~",
+        expect_ok=False,
     )
 
 
@@ -780,3 +791,101 @@ def test_openapi_folder_config_collections_recursive_list(aut_user_auth_wsgi_app
 
     for folder in response.json["value"]:
         assert "batman" not in folder["id"]
+
+
+@pytest.mark.skipif(version.is_raw_edition(), reason="Tested Attribute is not in RAW")
+def test_bake_agent_package_attribute_regression(
+    base: str, aut_user_auth_wsgi_app: WebTestAppForCMK
+) -> None:
+    folder_name = "blablabla"
+
+    aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/folder_config/collections/all",
+        params=json.dumps(
+            {
+                "name": folder_name,
+                "title": folder_name,
+                "parent": "~",
+                "attributes": {"bake_agent_package": True},
+            }
+        ),
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+        status=200,
+    )
+
+    # see if we get an outbound validation error on a single folder
+    aut_user_auth_wsgi_app.get(
+        url=base + "/objects/folder_config/~" + folder_name,
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+
+    # see if we get an outbound validation error on all folders
+    aut_user_auth_wsgi_app.get(
+        url=base + "/domain-types/folder_config/collections/all",
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+
+
+def test_openapi_folder_config_folders_with_duplicate_names_allowed_regression(
+    base: str,
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+) -> None:
+    resp = aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/folder_config/collections/all",
+        params=json.dumps(
+            {
+                "title": "a_duplicate",
+                "parent": "~",
+            }
+        ),
+        status=200,
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+    )
+    assert resp.json["id"] == "~a_duplicate"
+
+    resp = aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/folder_config/collections/all",
+        params=json.dumps(
+            {
+                "title": "a_duplicate",
+                "parent": "~",
+            }
+        ),
+        status=200,
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+    )
+    assert resp.json["id"] == "~a_duplicate-2"
+
+    resp = aut_user_auth_wsgi_app.post(
+        url=base + "/domain-types/folder_config/collections/all",
+        params=json.dumps(
+            {
+                "title": "a_duplicate",
+                "parent": "~",
+            }
+        ),
+        status=200,
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+    )
+    assert resp.json["id"] == "~a_duplicate-3"
+
+    wato_dir = Path(paths.omd_root, paths.check_mk_config_dir, "wato")
+    assert (wato_dir / "a_duplicate").exists()
+    assert (wato_dir / "a_duplicate-2").exists()
+    assert (wato_dir / "a_duplicate-3").exists()
+
+    resp = aut_user_auth_wsgi_app.get(
+        url=base + "/domain-types/folder_config/collections/all",
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+    folders = [folder["id"] for folder in resp.json["value"]]
+    assert "~a_duplicate" in folders
+    assert "~a_duplicate-2" in folders
+    assert "~a_duplicate-3" in folders

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -357,7 +357,7 @@ def store_piggyback_raw_data(
         piggyback_file_path = _get_piggybacked_file_path(source_hostname, piggybacked_hostname)
         logger.log(
             VERBOSE,
-            "Storing piggyback data for: %s",
+            "Storing piggyback data for: %r",
             piggybacked_hostname,
         )
         # Raw data is always stored as bytes. Later the content is

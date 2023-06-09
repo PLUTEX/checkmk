@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -16,7 +16,7 @@
 using namespace std::chrono_literals;
 
 namespace {
-constexpr int num_counters = 10;
+constexpr int num_counters = 21;
 
 struct CounterInfo {
     std::mutex mutex;
@@ -48,10 +48,22 @@ void counterReset(Counter which) {
     c.rate = 0.0;
 }
 
+void counterSet(Counter which, double value) {
+    auto &c = counter(which);
+    std::lock_guard<std::mutex> lg(c.mutex);
+    c.value = value;
+}
+
 void counterIncrement(Counter which) {
     auto &c = counter(which);
     std::lock_guard<std::mutex> lg(c.mutex);
     c.value++;
+}
+
+void counterIncrementBy(Counter which, std::size_t value) {
+    auto &c = counter(which);
+    std::lock_guard<std::mutex> lg(c.mutex);
+    c.value += value;
 }
 
 double counterValue(Counter which) {

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -36,7 +36,7 @@ fi
 
 section_checkmk() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p16"
+    echo "Version: 2.1.0p29"
     echo "AgentOS: macosx"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: $MK_CONFDIR"
@@ -157,10 +157,10 @@ run_mrpe_plugins() {
         # SC2162: read without -r will mangle backslashes.
         # The following suppression was added when we enabled the corresponding shellcheck.
         # It may well be that "read -r" would be more appropriate.
-        # shellcheck disable=SC2162
+        # shellcheck disable=SC2162,SC2001
         grep -Ev '^[[:space:]]*($|#)' "/etc/mrpe.cfg" |
-            while read descr cmdline; do
-                PLUGIN=${cmdline%% *}
+            while read descr rest; do
+                cmdline=$(echo "$rest" | sed -e 's/^([a-zA-Z:=[0-9]*]*) //g')
                 OUTPUT=$(eval "$cmdline")
                 echo "(${PLUGIN##*/}) $descr $? $OUTPUT" | tr \\n \\1
                 echo

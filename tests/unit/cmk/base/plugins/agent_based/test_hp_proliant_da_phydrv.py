@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1054,6 +1054,7 @@ def test_check_hp_proliant_da_phydrv(string_table, item, expected_result):
                     path=["hardware", "storage", "disks"],
                     key_columns={
                         "controller": "3",
+                        "drive_index": "8",
                     },
                     inventory_columns={
                         "bay": "1",

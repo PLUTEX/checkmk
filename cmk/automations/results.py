@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -19,6 +19,7 @@ from cmk.utils.type_defs import (
 from cmk.utils.type_defs import DiscoveryResult as SingleHostDiscoveryResult
 from cmk.utils.type_defs import (
     Gateways,
+    HostLabelValueDict,
     HostName,
     Item,
     Labels,
@@ -33,6 +34,7 @@ from cmk.utils.type_defs import (
     ServiceState,
 )
 from cmk.utils.type_defs import UpdateDNSCacheResult as UpdateDNSCacheResultRaw
+from cmk.utils.version import parse_check_mk_version
 
 
 class ResultTypeRegistry(Registry[Type["ABCAutomationResult"]]):
@@ -52,7 +54,7 @@ _DeserializedType = TypeVar("_DeserializedType", bound="ABCAutomationResult")
 
 @dataclass  # type: ignore[misc]  # https://github.com/python/mypy/issues/5374
 class ABCAutomationResult(ABC):
-    def serialize(self) -> SerializedResult:
+    def serialize(self, for_cmk_version: Optional[int]) -> SerializedResult:
         return SerializedResult(repr(astuple(self)))
 
     def to_pre_21(self) -> object:
@@ -86,7 +88,7 @@ class DiscoveryResult(ABCAutomationResult):
     ) -> Mapping[HostName, SingleHostDiscoveryResult]:
         return {k: SingleHostDiscoveryResult(**v) for k, v in serialized.items()}
 
-    def serialize(self) -> SerializedResult:
+    def serialize(self, for_cmk_version: Optional[int]) -> SerializedResult:
         return SerializedResult(repr(self._to_dict()))
 
     def to_pre_21(self) -> Mapping[Literal["results"], Mapping[HostName, Mapping[str, Any]]]:
@@ -128,17 +130,28 @@ class TryDiscoveryResult(ABCAutomationResult):
     new_labels: DiscoveredHostLabelsDict
     vanished_labels: DiscoveredHostLabelsDict
     changed_labels: DiscoveredHostLabelsDict
+    host_labels_by_host: Mapping[HostName, Mapping[str, HostLabelValueDict]]
 
     def to_pre_21(self) -> Mapping[str, Any]:
         return asdict(self)
 
-    def serialize(self) -> SerializedResult:
-        return SerializedResult(repr(astuple(self)))
+    def serialize(self, for_cmk_version: Optional[int]) -> SerializedResult:
+        if for_cmk_version is None or for_cmk_version < parse_check_mk_version("2.1.0p27"):
+            return SerializedResult(repr(astuple(self)[:-1]))
+        return SerializedResult(repr(asdict(self)))
 
     @classmethod
     def deserialize(cls, serialized_result: SerializedResult) -> "TryDiscoveryResult":
-        raw_output, raw_check_table, *raw_rest = literal_eval(serialized_result)
-        return cls(raw_output, [CheckPreviewEntry(*cpe) for cpe in raw_check_table], *raw_rest)
+        raw = literal_eval(serialized_result)
+        return cls(
+            output=raw["output"],
+            check_table=[CheckPreviewEntry(**cpe) for cpe in raw["check_table"]],
+            host_labels=raw["host_labels"],
+            new_labels=raw["new_labels"],
+            vanished_labels=raw["vanished_labels"],
+            changed_labels=raw["changed_labels"],
+            host_labels_by_host=raw["host_labels_by_host"],
+        )
 
     @staticmethod
     def automation_call() -> str:

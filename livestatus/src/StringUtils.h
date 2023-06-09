@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -86,6 +86,7 @@ std::string to_multi_line(const std::string &str);
 #ifdef CMC
 std::string ipv4ToString(in_addr_t ipv4_address);
 #endif
+bool is_utf8(std::string_view s);
 }  // namespace mk
 
 template <size_t N>

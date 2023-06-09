@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -425,6 +425,44 @@ def test_transform_discovery_if_rules(params, result):
                     "independent_mappings",
                     {
                         "map_admin_states": [(["2"], 1)],
+                    },
+                ),
+            },
+        ),
+        (
+            {
+                "map_operstates": [
+                    ("1", 0),
+                    ("2", 2),
+                    ("3", 0),
+                    ("6", 3),
+                    ("7", 1),
+                    ("8", 1),
+                    ("9", 2),
+                ],
+            },
+            {
+                "state_mappings": (
+                    "independent_mappings",
+                    {
+                        "map_operstates": [
+                            (["1", "3"], 0),
+                            (["2"], 2),
+                            (["6"], 3),
+                            (["7", "8"], 1),
+                        ],
+                        "map_admin_states": [(["2"], 2)],
+                    },
+                ),
+            },
+        ),
+        (
+            {"map_operstates": [("9", 0)]},
+            {
+                "state_mappings": (
+                    "independent_mappings",
+                    {
+                        "map_admin_states": [(["2"], 0)],
                     },
                 ),
             },

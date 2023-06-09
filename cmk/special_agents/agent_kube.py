@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """
@@ -1009,11 +1009,8 @@ class Cluster:
             )
             cluster.add_pod(pod)
             if pod.node is not None:
-                if pod.node not in _nodes:
-                    raise ValueError(
-                        f"Pod's ({api_pod.uid} {_nodes} {pod.node}) node is not present in the cluster"
-                    )
-                _nodes[pod.node].add_pod(pod)
+                if pod.node in _nodes:
+                    _nodes[pod.node].add_pod(pod)
             for pod_owner in _pod_owners_mapping.get(pod.uid, []):
                 pod_owner.add_pod(pod)
 
@@ -1483,14 +1480,15 @@ def write_namespaces_api_sections(
         _write_sections(sections)
 
     def output_resource_quota_sections(resource_quota: api.ResourceQuota) -> None:
+        if resource_quota.spec.hard is None:
+            return
+
+        hard = resource_quota.spec.hard
         sections = {
-            "kube_resource_quota_memory_resources_v1": lambda: resource_quota.spec.hard.memory
-            if resource_quota.spec.hard
-            else None,
-            "kube_resource_quota_cpu_resources_v1": lambda: resource_quota.spec.hard.cpu
-            if resource_quota.spec.hard
-            else None,
+            "kube_resource_quota_memory_resources_v1": lambda: hard.memory if hard.memory else None,
+            "kube_resource_quota_cpu_resources_v1": lambda: hard.cpu if hard.cpu else None,
         }
+
         _write_sections(sections)
 
     for api_namespace in api_namespaces:

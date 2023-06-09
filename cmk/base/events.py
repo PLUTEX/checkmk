@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -26,6 +26,7 @@ from cmk.utils.type_defs import EventRule, HostName, ServiceName
 
 import cmk.base.config as config
 import cmk.base.core
+from cmk.base.core_config import read_notify_host_file
 
 ContactList = List  # TODO Improve this
 EventContext = Dict[str, Any]  # TODO Improve this
@@ -248,10 +249,10 @@ def livestatus_fetch_contacts(
         return None  # We must allow notifications without Livestatus access
 
 
-def add_rulebased_macros(raw_context: EventContext) -> None:
+def add_rulebased_macros(raw_context: EventContext, contacts_needed: bool) -> None:
     # For the rule based notifications we need the list of contacts
     # an object has. The CMC does send this in the macro "CONTACTS"
-    if "CONTACTS" not in raw_context:
+    if "CONTACTS" not in raw_context and contacts_needed:
         # Ensure that we don't reach this when the Microcore is enabled. Triggering this logic
         # with the Microcore might result in dead locks.
         if config.is_cmc():
@@ -276,7 +277,11 @@ def add_rulebased_macros(raw_context: EventContext) -> None:
     raw_context["CONTACTNAME"] = "check-mk-notify"
 
 
-def complete_raw_context(raw_context: EventContext, with_dump: bool) -> None:
+def complete_raw_context(
+    raw_context: EventContext,
+    with_dump: bool,
+    contacts_needed: bool,
+) -> None:
     """Extend the raw notification context
 
     This ensures that all raw contexts processed in the notification code has specific variables
@@ -345,7 +350,7 @@ def complete_raw_context(raw_context: EventContext, with_dump: bool) -> None:
         # Rule based notifications enabled? We might need to complete a few macros
         contact = raw_context.get("CONTACTNAME")
         if not contact or contact == "check-mk-notify":
-            add_rulebased_macros(raw_context)
+            add_rulebased_macros(raw_context, contacts_needed)
 
         # For custom notifications the number is set to 0 by the core (Nagios and CMC). We force at least
         # number 1 here, so that rules with conditions on numbers do not fail (the minimum is 1 here)
@@ -401,16 +406,7 @@ def complete_raw_context(raw_context: EventContext, with_dump: bool) -> None:
             raw_context["SERVICEFORURL"] = quote(raw_context["SERVICEDESC"])
         raw_context["HOSTFORURL"] = quote(raw_context["HOSTNAME"])
 
-        config_cache = config.get_config_cache()
-        labels = config_cache.labels
-        ruleset_matcher = config_cache.ruleset_matcher
-        for k, v in labels.labels_of_host(ruleset_matcher, raw_context["HOSTNAME"]).items():
-            raw_context["HOSTLABEL_" + k] = v
-        if raw_context["WHAT"] == "SERVICE":
-            for k, v in labels.labels_of_service(
-                ruleset_matcher, raw_context["HOSTNAME"], raw_context["SERVICEDESC"]
-            ).items():
-                raw_context["SERVICELABEL_" + k] = v
+        _update_raw_context_with_labels(raw_context)
 
     except Exception as e:
         logger.info("Error on completing raw context: %s", e)
@@ -426,6 +422,17 @@ def complete_raw_context(raw_context: EventContext, with_dump: bool) -> None:
             )
         )
         logger.info("Computed variables:\n%s", log_context)
+
+
+def _update_raw_context_with_labels(raw_context: EventContext) -> None:
+    labels = read_notify_host_file(raw_context["HOSTNAME"])
+    for k, v in labels.host_labels.items():
+        # Dynamically added keys...
+        raw_context["HOSTLABEL_" + k] = v  # type: ignore[literal-required]
+    if raw_context["WHAT"] == "SERVICE":
+        for k, v in labels.service_labels.get(raw_context["SERVICEDESC"], {}).items():
+            # Dynamically added keys...
+            raw_context["SERVICELABEL_" + k] = v  # type: ignore[literal-required]
 
 
 # TODO: Use cmk.utils.render.*?

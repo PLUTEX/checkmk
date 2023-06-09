@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 // conditions defined in the file COPYING, which is part of this source code package.
 
@@ -134,7 +134,7 @@ export function update_argument_hints() {
         // Create nodes
         nodes = rule_body.selectAll("div.listofstrings").selectAll("input.text").nodes();
         while (required_inputs >= nodes.length) {
-            valuespecs.list_of_strings_add_new_field(nodes[nodes.length - 1]);
+            valuespecs.list_of_strings_extend(nodes[nodes.length - 1], false, "");
             nodes = rule_body.selectAll("div.listofstrings").selectAll("input.text").nodes();
         }
 

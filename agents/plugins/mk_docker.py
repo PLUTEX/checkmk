@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 r"""Check_MK Agent Plugin: mk_docker.py
@@ -19,7 +19,7 @@ This plugin it will be called by the agent without any arguments.
 
 from __future__ import with_statement
 
-__version__ = "2.1.0p16"
+__version__ = "2.1.0p29"
 
 # this file has to work with both Python 2 and 3
 # pylint: disable=super-with-arguments
@@ -255,7 +255,12 @@ class ParallelDfCall:
     def _write_df_result(self, data):
         with self._my_tmp_file.open("wb") as file_:
             file_.write(json.dumps(data).encode("utf-8"))
-        self._my_tmp_file.rename(self._spool_file)
+        try:
+            self._my_tmp_file.rename(self._spool_file)
+        except OSError:
+            # CMK-12642: It can happen that two df calls succeed almost at the same time. Then, one
+            # process attempts to move while the other one already deleted all temp files.
+            pass
 
     def _read_df_result(self):
         """read from the spool file
@@ -274,7 +279,7 @@ class MKDockerClient(docker.DockerClient):
 
     def __init__(self, config):
         super(MKDockerClient, self).__init__(config["base_url"], version=MKDockerClient.API_VERSION)
-        all_containers = self.containers.list(all=True, ignore_removed=True)
+        all_containers = _robust_inspect(self, "containers")
         if config["container_id"] == "name":
             self.all_containers = {c.attrs["Name"].lstrip("/"): c for c in all_containers}
         elif config["container_id"] == "long":
@@ -345,10 +350,20 @@ class MKDockerClient(docker.DockerClient):
         if not container.status == "running":
             return self._container_stats.setdefault(container_key, None)
 
+        # We use the streaming mode here because it faciliates error handling. If a container is
+        # removed at exactly the same time when we query the stats, we get StopIteration in
+        # streaming mode. In non-streaming mode, the error type is version-dependent.
+        stats_generator = container.stats(stream=True, decode=True)
         try:
-            stats = container.stats(stream=False)
-        except docker.errors.NotFound:
+            next(stats_generator)  # we need to advance the generator by one to get useful data
+            stats = next(stats_generator)
+        except (
             # container was removed in between collecting containers and here
+            docker.errors.NotFound,
+            # container is removed just now; it could be that under very old docker versions (eg.
+            # 1.31), there are other scenarios causing this exception (SUP-10974)
+            StopIteration,
+        ):
             return self._container_stats.setdefault(container_key, None)
 
         return self._container_stats.setdefault(container_key, stats)
@@ -453,14 +468,32 @@ def section_node_disk_usage(client):
     section.write()
 
 
-def _robust_inspect_images(client):
-    # workaround instead of calling client.images.list() directly to be able to
-    # ignore errors when image was removed in between listing available images
+def _robust_inspect(client, docker_object):
+    object_map = {
+        "images": {
+            "api": client.api.images,
+            "getter": client.images.get,
+            "kwargs": {},
+        },
+        "containers": {
+            "api": client.api.containers,
+            "getter": client.containers.get,
+            "kwargs": {"all": True},
+        },
+    }
+    if docker_object not in object_map:
+        raise RuntimeError("Unkown docker object: %s" % docker_object)
+
+    api = object_map[docker_object]["api"]
+    getter = object_map[docker_object]["getter"]
+    kwargs = object_map[docker_object]["kwargs"]
+    # workaround instead of calling client.OBJECT.list() directly to be able to
+    # ignore errors when OBJECT was removed in between listing available OBJECT
     # and getting detailed information about them
-    for response in client.api.images():
+    for response in api(**kwargs):
         try:
-            yield client.images.get(response["Id"])
-        except docker.errors.ImageNotFound:
+            yield getter(response["Id"])
+        except docker.errors.NotFound:
             pass
 
 
@@ -469,8 +502,7 @@ def section_node_images(client):
     """in subsections list [[[images]]] and [[[containers]]]"""
     section = Section("node_images")
 
-    images = _robust_inspect_images(client)
-
+    images = _robust_inspect(client, "images")
     LOGGER.debug(images)
     section.append("[[[images]]]")
     for image in images:
@@ -538,7 +570,14 @@ def section_container_network(client, container_id):
 
 
 def _is_not_running_exception(exception):
-    return exception.response.status_code == 409 and "is not running" in exception.explanation
+    return (
+        exception.response.status_code
+        in (
+            409,
+            500,  # Thrown by old docker versions: SUP-10974
+        )
+        and "is not running" in exception.explanation
+    )
 
 
 def section_container_agent(client, container_id):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Helper functions for dealing with host tags"""
@@ -81,7 +81,17 @@ class TagConfigFile:
 
 def load_tag_config() -> TagConfig:
     """Load the tag config object based upon the most recently saved tag config file"""
-    tag_config = cmk.utils.tags.TagConfig.from_config(TagConfigFile().load_for_modification())
+    return TagConfig.from_config(TagConfigFile().load_for_modification())
+
+
+def load_tag_config_read_only() -> TagConfig:
+    return TagConfig.from_config(TagConfigFile().load_for_reading())
+
+
+def load_all_tag_config_read_only() -> TagConfig:
+    """Load the tag config + the built in tag config.  Read Only"""
+    tag_config = load_tag_config_read_only()
+    tag_config += BuiltinTagConfig()
     return tag_config
 
 
@@ -137,13 +147,6 @@ def tag_group_exists(ident: str, builtin_included=False) -> bool:
     if builtin_included:
         tag_config += BuiltinTagConfig()
     return tag_config.tag_group_exists(ident)
-
-
-def load_aux_tags() -> List[str]:
-    """Return the list available auxiliary tag ids (ID != GUI title)"""
-    tag_config = load_tag_config()
-    tag_config += cmk.utils.tags.BuiltinTagConfig()
-    return [entry[0] for entry in tag_config.aux_tag_list.get_choices()]
 
 
 def _update_tag_dependencies():

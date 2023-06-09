@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -196,7 +196,7 @@ def page_login() -> None:
     html.open_div(id_="loginfoot")
     html.img("themes/facelift/images/logo_cmk_small.png", class_="logomk")
     html.div(
-        HTML(_('&copy; <a target="_blank" href="https://checkmk.com">tribe29 GmbH</a>')),
+        HTML(_('&copy; <a target="_blank" href="https://checkmk.com">Checkmk GmbH</a>')),
         class_="copyright",
     )
     html.close_div()  # close content-div

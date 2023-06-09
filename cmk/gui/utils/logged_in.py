@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Manage the currently logged in user"""
@@ -205,7 +205,7 @@ class LoggedInUser:
 
     @property
     def bi_expansion_level(self) -> int:
-        return self.load_file("bi_treestate", (None,))[0]
+        return self.load_file("bi_treestate", (0,))[0]
 
     @bi_expansion_level.setter
     def bi_expansion_level(self, value: int) -> None:
@@ -344,7 +344,7 @@ class LoggedInUser:
         self, unfiltered_sites: Optional[SiteConfigurations] = None
     ) -> SiteConfigurations:
         if unfiltered_sites is None:
-            unfiltered_sites = sites.allsites()
+            unfiltered_sites = sites.get_enabled_sites()
 
         authorized_sites = self.get_attribute("authorized_sites")
         if authorized_sites is None:
@@ -357,7 +357,11 @@ class LoggedInUser:
     def authorized_login_sites(self) -> SiteConfigurations:
         login_site_ids = sites.get_login_slave_sites()
         return self.authorized_sites(
-            {site_id: s for site_id, s in sites.allsites().items() if site_id in login_site_ids}
+            {
+                site_id: s
+                for site_id, s in sites.get_enabled_sites().items()
+                if site_id in login_site_ids
+            }
         )
 
     def may(self, pname: str) -> bool:

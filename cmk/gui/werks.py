@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -68,7 +68,9 @@ class ModeAboutCheckmkPage(cmk.gui.pages.Page):
         html.open_div(id_="info_title")
         html.h1(_("Your monitoring machine"))
         html.a(
-            html.render_img(theme.url("images/tribe29.svg")), "https://tribe29.com", target="_blank"
+            html.render_img(theme.url("images/checkmk_logo.svg")),
+            "https://checkmk.com",
+            target="_blank",
         )
         html.close_div()
 
@@ -96,14 +98,8 @@ class ModeAboutCheckmkPage(cmk.gui.pages.Page):
         )
         html.close_div()
 
-        version_major_minor = re.sub(r".\d+$", "", Version(__version__).version_base)
-        if version_major_minor:
-            current_version_link = "https://checkmk.com/product/checkmk-%s" % version_major_minor
-        else:
-            current_version_link = "https://checkmk.com/product/latest-version"
-
         html.open_div(id="info_image")
-        html.open_a(href=current_version_link, target="_blank")
+        html.open_a(href="https://checkmk.com/product/latest-version", target="_blank")
         html.img(theme.url("images/monitoring-machine.png"))
         html.close_a()
         html.close_div()
@@ -111,7 +107,7 @@ class ModeAboutCheckmkPage(cmk.gui.pages.Page):
         html.close_div()
 
         html.open_div(id_="info_footer")
-        html.span(_("© %s tribe29 GmbH. All Rights Reserved.") % time.strftime("%Y"))
+        html.span(_("© %s Checkmk GmbH. All Rights Reserved.") % time.strftime("%Y"))
         html.a(_("License agreement"), href="https://checkmk.com/legal.html", target="_blank")
         html.close_div()
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -12,6 +12,8 @@ from cmk.utils.password_store import Password
 
 import cmk.gui.userdb as userdb
 from cmk.gui.globals import user
+from cmk.gui.hooks import request_memoize
+from cmk.gui.type_defs import Choices
 from cmk.gui.watolib.simple_config_file import WatoSimpleConfigFile
 from cmk.gui.watolib.utils import wato_root_dir
 
@@ -90,7 +92,8 @@ def split_password_specs(
     return meta_data, passwords
 
 
-def passwordstore_choices() -> list[tuple[str, str]]:
+@request_memoize()
+def passwordstore_choices() -> Choices:
     pw_store = PasswordStore()
     return [
         (ident, pw["title"])

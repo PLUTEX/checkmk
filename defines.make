@@ -1,4 +1,4 @@
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -41,7 +41,7 @@ EDITION            := free
 EDITION_SHORT      := cfe
 endif
 
-VERSION            := 2.1.0p16
+VERSION            := 2.1.0p29
 OMD_VERSION        := $(VERSION).$(EDITION_SHORT)
 # Do not use the the ".c?e" EDITION_SHORT suffix, the edition is part of the package name
 PKG_VERSION        := $(VERSION)
@@ -64,7 +64,7 @@ SHELL              := /bin/bash
 CLANG_VERSION      := 12
 
 # In our CI we use this compiler, but we are not restricted to this exact version
-GCC_VERSION_MAJOR      := 11
+GCC_VERSION_MAJOR      := 12
 GCC_VERSION_MINOR      := 2
 GCC_VERSION_PATCHLEVEL := 0
 GCC_VERSION	       := "${GCC_VERSION_MAJOR}.${GCC_VERSION_MINOR}.${GCC_VERSION_PATCHLEVEL}"
@@ -72,7 +72,7 @@ GCC_VERSION	       := "${GCC_VERSION_MAJOR}.${GCC_VERSION_MINOR}.${GCC_VERSION_P
 # When you update the Python version, you have to update the test expectations
 # in test_03_python_interpreter_version and test_03_pip_interpreter_version.
 # Update omd/Licenses.csv, too.
-PYTHON_VERSION	   := 3.9.10
+PYTHON_VERSION	   := 3.9.16
 
 # convenience stuff derived from PYTHON_VERSION
 PY_ARRAY	       := $(subst ., ,$(PYTHON_VERSION))

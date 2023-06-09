@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """WATO's awesome rule editor: Lets the user edit rule based parameters"""
@@ -71,7 +71,7 @@ from cmk.gui.plugins.wato.utils import (
 )
 from cmk.gui.plugins.wato.utils.main_menu import main_module_registry
 from cmk.gui.sites import wato_slave_sites
-from cmk.gui.table import Foldable, Table, table_element
+from cmk.gui.table import Foldable, show_row_count, Table, table_element
 from cmk.gui.type_defs import ActionResult, HTTPVariables, PermissionName
 from cmk.gui.utils.escaping import escape_to_html, escape_to_html_permissive, strip_tags
 from cmk.gui.utils.urls import makeuri, makeuri_contextless
@@ -1054,8 +1054,10 @@ class ModeEditRuleset(WatoMode):
                     )
                     self._rule_cells(table, rule)
 
-        row_info = _("1 row") if num_rows == 1 else _("%d rows") % num_rows
-        html.javascript("cmk.utils.update_row_info(%s);" % json.dumps(row_info))
+        show_row_count(
+            row_count=(row_count := num_rows),
+            row_info=_("row") if row_count == 1 else _("rows"),
+        )
 
     @staticmethod
     def _css_for_rule(search_options, rule: Rule) -> Optional[str]:

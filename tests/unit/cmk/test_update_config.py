@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -15,6 +15,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from tests.testlib.base import Scenario
+from tests.testlib.plugin_registry import reset_registries
 
 # This GUI specific fixture is also needed in this context
 from tests.unit.cmk.gui.conftest import load_plugins  # noqa: F401 # pylint: disable=unused-import
@@ -22,6 +23,7 @@ from tests.unit.cmk.gui.conftest import load_plugins  # noqa: F401 # pylint: dis
 import cmk.utils.log
 import cmk.utils.paths
 from cmk.utils import password_store, store, version
+from cmk.utils.agent_registration import get_uuid_link_manager
 from cmk.utils.type_defs import (
     CheckPluginName,
     ContactgroupName,
@@ -33,15 +35,20 @@ from cmk.utils.type_defs import (
 from cmk.utils.version import is_raw_edition
 
 import cmk.gui.config
+from cmk.gui.plugins.wato.check_mk_configuration import ConfigVariableGroupUserInterface
+from cmk.gui.plugins.watolib.utils import config_variable_registry, ConfigVariable
 from cmk.gui.type_defs import UserSpec
 from cmk.gui.userdb import load_users, save_users
 from cmk.gui.utils.script_helpers import application_and_request_context
+from cmk.gui.valuespec import TextInput, Transform
 from cmk.gui.watolib.changes import AuditLogStore, ObjectRef, ObjectRefType
+from cmk.gui.watolib.config_domains import ConfigDomainGUI
 from cmk.gui.watolib.hosts_and_folders import Folder
 
 # pylint: disable=redefined-outer-name
 from cmk.gui.watolib.password_store import PasswordStore
 from cmk.gui.watolib.rulesets import Rule, Ruleset, RulesetCollection
+from cmk.gui.watolib.sites import SiteManagementFactory
 
 import cmk.update_config as update_config
 
@@ -54,7 +61,7 @@ def request_context() -> Iterator[None]:
 
 @pytest.fixture(name="uc")
 def fixture_uc() -> update_config.UpdateConfig:
-    return update_config.UpdateConfig(cmk.utils.log.logger, argparse.Namespace())
+    return update_config.UpdateConfig(cmk.utils.log.logger, argparse.Namespace(debug=False))
 
 
 def test_parse_arguments_defaults() -> None:
@@ -137,6 +144,160 @@ def test__transform_wato_rulesets_params(
 
     assert len(ruleset.get_rules()[0]) == 3
     assert ruleset.get_rules()[0][2].value == transformed_param_value
+
+
+def setup_fileinfo_groups_rulesets(ruleset_value) -> RulesetCollection:
+    RULESET_PATTERNS_SPEC = [
+        {
+            "condition": {},
+            "value": {
+                "group_patterns": [
+                    ("test-group-1", ("/tmp/test-sup-11745/*", "/tmp/test-sup-11745/exclude/*")),
+                    ("test-group-1", ("/tmp/test-sup-11745/*", "/tmp/test-sup-11745/exclude/*")),
+                    (
+                        "test-group-2",
+                        ("/tmp/test-sup-11745/test-2/*", "/tmp/test-sup-11745/test-2/exclude/*"),
+                    ),
+                    (
+                        "test-group-3",
+                        ("/tmp/test-sup-11745/3/*", "/tmp/test-sup-11745/exclude/3/*"),
+                    ),
+                ]
+            },
+        },
+        {
+            "condition": {},
+            "value": {
+                "group_patterns": [
+                    (
+                        "test-group-3",
+                        ("/tmp/test-sup-11745/3/*", "/tmp/test-sup-11745/exclude/3/*"),
+                    ),
+                    ("test-group-2", ("/tmp/test-sup-11745/2/*", "/tmp/test-sup-11745/2/*")),
+                ]
+            },
+        },
+    ]
+    # Setting up "fileinfo_groups" ruleset
+    patterns_ruleset = Ruleset("fileinfo_groups", {})
+    patterns_ruleset.from_config(Folder(""), RULESET_PATTERNS_SPEC)
+
+    rulesets = RulesetCollection()
+    rulesets.set("fileinfo_groups", patterns_ruleset)
+
+    # Setting up "static_checks:fileinfo-groups" ruleset
+    ruleset_spec = [
+        {"condition": {}, "value": ruleset_value},
+    ]
+    ruleset = Ruleset("static_checks:fileinfo-groups", {})
+    ruleset.from_config(Folder(""), ruleset_spec)
+    rulesets.set("static_checks:fileinfo-groups", ruleset)
+    return rulesets
+
+
+@pytest.mark.parametrize(
+    "ruleset_value, expected_group_patterns",
+    [
+        pytest.param(
+            ("fileinfo_groups", "test-group-1", {"maxsize_smallest": (1, 2), "group_patterns": []}),
+            [("/tmp/test-sup-11745/*", "/tmp/test-sup-11745/exclude/*")],
+            id="successful_transform",
+        ),
+        pytest.param(
+            ("fileinfo_groups", "test-group-3", {"maxsize_smallest": (1, 2), "group_patterns": []}),
+            [("/tmp/test-sup-11745/3/*", "/tmp/test-sup-11745/exclude/3/*")],
+            id="successful_transform_duplicate_identical_group",
+        ),
+        pytest.param(
+            (
+                "sap_hana_fileinfo_groups",
+                "test-group-1",
+                {"maxsize_smallest": (1, 2), "group_patterns": []},
+            ),
+            [("/tmp/test-sup-11745/*", "/tmp/test-sup-11745/exclude/*")],
+            id="successful_transform_sap_hana",
+        ),
+        pytest.param(
+            (
+                "fileinfo_groups",
+                "test-group-1",
+                {"group_patterns": [("/a/path", "/another/path/*")]},
+            ),
+            [("/a/path", "/another/path/*")],
+            id="patterns_already_filled",
+        ),
+        pytest.param(
+            ("fileinfo_groups", "not-existing-file-group", {"group_patterns": []}),
+            [],
+            id="not_existing_file_group",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("request_context")
+def test__transform_wato_ruleset_fileinfo_groups(
+    uc: update_config.UpdateConfig,
+    ruleset_value: Tuple[str, str, dict],
+    expected_group_patterns: list[Tuple[str, str]],
+) -> None:
+    rulesets = setup_fileinfo_groups_rulesets(ruleset_value)
+
+    uc._transform_wato_ruleset_fileinfo_groups(rulesets)
+
+    _folder, _idx, transformed_rule = rulesets.get("static_checks:fileinfo-groups").get_rules()[0]
+    assert transformed_rule.value[2]["group_patterns"] == expected_group_patterns
+
+
+@pytest.mark.parametrize(
+    "replaced_check_name",
+    [
+        "ucd_cpu_load",
+        "hpux_cpu",
+        "mcafee_emailgateway_cpuload",
+        "statgrab_load",
+        "arbor_peakflow_sp_cpu_load",
+        "arbor_peakflow_tms_cpu_load",
+        "arbor_pravail_cpu_load",
+    ],
+)
+@pytest.mark.usefixtures("request_context")
+def test___transform_wato_ruleset_enforced_service_cpu_load(
+    uc: update_config.UpdateConfig, replaced_check_name: str
+) -> None:
+    rulesets = RulesetCollection()
+    ruleset_spec = [
+        {"condition": {}, "value": (replaced_check_name, None, {"levels": (10.0, 20.0)})},
+    ]
+    ruleset = Ruleset("static_checks:cpu_load", {})
+    ruleset.from_config(Folder(""), ruleset_spec)
+    rulesets.set("static_checks:cpu_load", ruleset)
+
+    uc._transform_wato_ruleset_enforced_service_cpu_load(rulesets)
+
+    _folder, _idx, transformed_rule = rulesets.get("static_checks:cpu_load").get_rules()[0]
+    replacement_check_name = "cpu_loads"
+    assert transformed_rule.value[0] == replacement_check_name
+
+
+@pytest.mark.usefixtures("request_context")
+def test__transform_wato_ruleset_fileinfo_groups_duplicate_group(
+    uc: update_config.UpdateConfig, mocker: MockerFixture
+) -> None:
+    ruleset_value = (
+        "fileinfo_groups",
+        "test-group-2",
+        {"maxsize_smallest": (1, 2), "group_patterns": []},
+    )
+    rulesets = setup_fileinfo_groups_rulesets(ruleset_value)
+
+    mock_error = mocker.patch.object(
+        uc._logger,
+        "error",
+    )
+    uc._transform_wato_ruleset_fileinfo_groups(rulesets)
+    assert (
+        "ERROR: Failed to transform fileinfo_groups enforced service"
+        in mock_error.call_args.args[0]
+    )
 
 
 @pytest.mark.parametrize(
@@ -830,7 +991,85 @@ def test_password_sanitizer_multiline() -> None:
     assert entry.diff_text == expected
 
 
-def test_update_global_config(
+@pytest.fixture(name="test_var")
+def fixture_test_var(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    test_var_name = "test_var"
+
+    class ConfigVariableTestVar(ConfigVariable):
+        def group(self):
+            return ConfigVariableGroupUserInterface
+
+        def domain(self):
+            return ConfigDomainGUI
+
+        def ident(self):
+            return test_var_name
+
+        def valuespec(self):
+            return Transform(TextInput(), forth=lambda x: "new" if x == "old" else x)
+
+    with reset_registries([config_variable_registry]):
+        config_variable_registry.register(ConfigVariableTestVar)
+        yield test_var_name
+
+
+def test_update_global_config_transform_values(
+    mocker: MockerFixture,
+    uc: update_config.UpdateConfig,
+    test_var: str,
+) -> None:
+    # Disable variable filtering by known Checkmk variables
+    mocker.patch.object(
+        update_config, "filter_unknown_settings", lambda global_config: global_config
+    )
+
+    assert uc._update_global_config({test_var: "old"}) == {test_var: "new"}
+
+
+@pytest.mark.usefixtures("request_context")
+def test_update_global_settings_migrates_global_settings(
+    uc: update_config.UpdateConfig, test_var: str
+) -> None:
+    cmk.gui.watolib.global_settings.save_global_settings(
+        {
+            "test_var": "old",
+        }
+    )
+    uc._update_global_settings()
+    assert cmk.gui.watolib.global_settings.load_configuration_settings(full_config=True) == {
+        "test_var": "new"
+    }
+
+
+@pytest.mark.usefixtures("request_context")
+def test_update_global_settings_migrates_site_specific_settings(
+    monkeypatch: pytest.MonkeyPatch, uc: update_config.UpdateConfig, test_var: str
+) -> None:
+    monkeypatch.setattr(update_config, "is_wato_slave_site", lambda: True)
+    cmk.gui.watolib.global_settings.save_site_global_settings(
+        {
+            "test_var": "old",
+        }
+    )
+    uc._update_global_settings()
+    assert cmk.gui.watolib.global_settings.load_site_global_settings() == {"test_var": "new"}
+
+
+@pytest.mark.usefixtures("request_context")
+def test_update_global_settings_migrates_remote_site_specific_settings(
+    monkeypatch: pytest.MonkeyPatch, uc: update_config.UpdateConfig, test_var: str
+) -> None:
+    monkeypatch.setattr(update_config, "site_globals_editable", lambda site, spec: True)
+    site_mgmt = SiteManagementFactory().factory()
+    configured_sites = site_mgmt.load_sites()
+    configured_sites["NO_SITE"]["globals"] = {"test_var": "old"}
+    site_mgmt.save_sites(configured_sites, activate=False)
+
+    uc._update_global_settings()
+    assert site_mgmt.load_sites()["NO_SITE"]["globals"] == {"test_var": "new"}
+
+
+def test_update_global_config_rename_variables_and_change_values(
     mocker: MockerFixture,
     uc: update_config.UpdateConfig,
 ) -> None:
@@ -843,34 +1082,24 @@ def test_update_global_config(
             ("missing", "new_missing", {}),
         ],
     )
+
+    # Disable variable filtering by known Checkmk variables
     mocker.patch.object(
-        update_config,
-        "filter_unknown_settings",
-        lambda global_config: {k: v for k, v in global_config.items() if k != "unknown"},
+        update_config, "filter_unknown_settings", lambda global_config: global_config
     )
-    mocker.patch.object(
-        update_config.UpdateConfig,
-        "_transform_global_config_value",
-        lambda _self, config_var, config_val: {
-            "new_global_a": config_val,
-            "new_global_b": 15,
-            "global_c": ["x", "y", "z"],
-            "unchanged": config_val,
-        }[config_var],
-    )
+
     assert uc._update_global_config(
         {
             "global_a": True,
             "global_b": 14,
-            "global_c": None,
-            "unchanged": "please leave me alone",
+            "keep": "do not remove me",
             "unknown": "How did this get here?",
         }
     ) == {
-        "global_c": ["x", "y", "z"],
-        "unchanged": "please leave me alone",
+        "keep": "do not remove me",
+        "unknown": "How did this get here?",
         "new_global_a": 1,
-        "new_global_b": 15,
+        "new_global_b": 14,
     }
 
 
@@ -1125,8 +1354,12 @@ def test_check_password_hashes(uc: update_config.UpdateConfig) -> None:
             ),
             ("bcrypt", "$2b$04$5LiM0CX3wUoO55cGCwrkDeZIU5zyBqPDZfV9zU4Q2WH/Lkkn2lypa"),
             ("unrecognized", "foo"),
+            ("automation_md5", "$apr1$EpPwa/X9$TB2UcQxmrSTJWQQcwHzJM/"),
         ]
     )
+    # make an automation user by setting the automation_secret
+    dont_update[UserId("automation_md5")]["automation_secret"] = "my_automation_secret"
+
     all_users = do_update | dont_update
     save_users(all_users)
 
@@ -1136,3 +1369,63 @@ def test_check_password_hashes(uc: update_config.UpdateConfig) -> None:
     assert all(user in loaded for user in all_users)
     assert all(loaded[user].get("enforce_pw_change") for user in do_update)
     assert not any(loaded[user].get("enforce_pw_change") for user in dont_update)
+
+
+@pytest.mark.usefixtures("request_context")
+@pytest.mark.parametrize(
+    "user_id, should_warn",
+    [
+        # --- previously possible via ldap
+        ("admin/", True),
+        (".", True),
+        ("@min", True),
+        ("adm!n", True),
+        ("%2F", True),
+        ("😀", True),
+        # --- still ok
+        ("123$admin", False),
+        ("Ädmün", False),
+        ("$-@._", False),
+        ("_ADMIN", False),
+        ("ↄ𝒽ѥ𝕔𖹬", False),
+        ("艋", False),
+    ],
+)
+def test_check_user_ids(
+    mocker: MockerFixture,
+    uc: update_config.UpdateConfig,
+    user_id: str,
+    should_warn: bool,
+) -> None:
+    mock_warner = mocker.patch.object(uc._logger, "warning")
+    save_users({UserId(user_id): {"connector": "mytestconnector"}})
+
+    uc._check_user_ids()
+
+    assert mock_warner.call_count == (1 if should_warn else 0)
+
+
+@pytest.mark.usefixtures("request_context")
+def test_fix_agent_receiver_symlinks(uc: update_config.UpdateConfig):
+    source = Path(cmk.utils.paths.received_outputs_dir, "f0ca2e5d-06ea-4b04-89d1-67df0203d449")
+    source.parent.mkdir(parents=True, exist_ok=True)
+    target = Path(cmk.utils.paths.data_source_push_agent_dir, "my_new_host")
+    source.symlink_to(target)
+
+    link_manager = get_uuid_link_manager()
+
+    links = list(link_manager)
+    assert len(links) == 1
+    assert links[0].source == source
+    assert links[0].target == target
+
+    uc._fix_agent_receiver_symlinks()
+
+    links = list(link_manager)
+    assert len(links) == 1
+    assert links[0].source == source
+    assert links[0].target == Path(
+        "../../../../tmp/check_mk/data_source_cache/push-agent/my_new_host"
+    )
+
+    assert True

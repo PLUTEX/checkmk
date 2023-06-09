@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -656,6 +656,10 @@ def _valuespec_inventory_processes_rules() -> Transform:
                 "done. These services will be created with default parameters. They will get "
                 "critical when no process is running and OK otherwise. You can parameterize "
                 "the check with the ruleset <i>State and count of processes</i>."
+                "Care should be taken when removing vanished services, for example via "
+                "<i>Bulk Discovery</i>. When a process vanishes, so does the corresponding "
+                "service. So despite that the service is critical, it can be removed by discovery, "
+                "effectively turning off monitoring."
             ),
             elements=[
                 ("descr", process_discovery_descr_option()),

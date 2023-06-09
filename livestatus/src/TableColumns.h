@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -8,8 +8,8 @@
 
 #include "config.h"  // IWYU pragma: keep
 
+#include <map>
 #include <string>
-#include <vector>
 
 #include "Table.h"
 class Column;
@@ -31,7 +31,7 @@ public:
     [[nodiscard]] std::string tableNameOf(const Column &column) const;
 
 private:
-    std::vector<const Table *> _tables;
+    std::map<std::string, const Table *> tables_;
 };
 
 #endif  // TableColumns_h

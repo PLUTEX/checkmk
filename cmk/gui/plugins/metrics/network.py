@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -864,7 +864,19 @@ metric_info["ap_devices_percent_unhealthy"] = {
 metric_info["request_rate"] = {
     "title": _("Request rate"),
     "unit": "1/s",
+    "color": "35/a",
+}
+
+metric_info["server_conns"] = {
+    "title": _("Server connections"),
+    "unit": "count",
     "color": "34/a",
+}
+
+metric_info["client_conns"] = {
+    "title": _("Client connections"),
+    "unit": "count",
+    "color": "45/a",
 }
 
 metric_info["error_rate"] = {

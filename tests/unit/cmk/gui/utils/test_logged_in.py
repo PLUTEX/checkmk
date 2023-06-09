@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -139,7 +139,7 @@ def test_unauthenticated_users_authorized_sites(monkeypatch, user):
         "site1": {},
     }
 
-    monkeypatch.setattr("cmk.gui.sites.allsites", lambda: {"site1": {}, "site2": {}})
+    monkeypatch.setattr("cmk.gui.sites.get_enabled_sites", lambda: {"site1": {}, "site2": {}})
     assert user.authorized_sites() == {"site1": {}, "site2": {}}
 
 
@@ -147,7 +147,7 @@ def test_unauthenticated_users_authorized_sites(monkeypatch, user):
 def test_unauthenticated_users_authorized_login_sites(monkeypatch, user):
     monkeypatch.setattr("cmk.gui.sites.get_login_slave_sites", lambda: ["slave_site"])
     monkeypatch.setattr(
-        "cmk.gui.sites.allsites",
+        "cmk.gui.sites.get_enabled_sites",
         lambda: {
             "master_site": {},
             "slave_site": {},
@@ -193,7 +193,7 @@ MONITORING_USER_CACHED_PROFILE = {
     "authorized_sites": ["heute", "heute_slave_1"],
     "contactgroups": ["all"],
     "disable_notifications": {},
-    "email": "test_user@tribe29.com",
+    "email": "test_user@checkmk.com",
     "fallback_contact": False,
     "force_authuser": False,
     "locked": False,
@@ -240,7 +240,7 @@ def fixture_monitoring_user(request_context):
 def test_monitoring_user(monitoring_user):
     assert monitoring_user.id == "test"
     assert monitoring_user.alias == "Test user"
-    assert monitoring_user.email == "test_user_test@tribe29.com"
+    assert monitoring_user.email == "test_user_test@checkmk.com"
     assert monitoring_user.confdir.endswith("/web/test")
 
     assert monitoring_user.role_ids == ["user"]

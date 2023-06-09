@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 // conditions defined in the file COPYING, which is part of this source code package.
 
@@ -123,7 +123,7 @@ function list_of_strings_remove_event_handlers(input) {
 
 /* Is called when the last input field in a ListOfString gets focus.
    In that case a new input field is being appended. */
-function list_of_strings_extend(input, split_on_paste, split_separators) {
+export function list_of_strings_extend(input, split_on_paste, split_separators) {
     var new_input = list_of_strings_add_new_field(input);
 
     /* Move focus function from old last to new last input field */
@@ -131,7 +131,7 @@ function list_of_strings_extend(input, split_on_paste, split_separators) {
     list_of_strings_remove_event_handlers(input);
 }
 
-export function list_of_strings_add_new_field(input) {
+function list_of_strings_add_new_field(input) {
     /* The input field has a unique name like "extra_emails_2" for the field with
        the index 2. We need to convert this into "extra_emails_3". */
 
@@ -155,6 +155,8 @@ export function list_of_strings_add_new_field(input) {
     let new_div = document.createElement("DIV");
     if (input.tagName == "INPUT") {
         new_div.innerHTML = div.innerHTML.replace('"' + old_name + '"', '"' + new_name + '"');
+        // Do not clone placeholder help texts
+        d3.select(new_div).select("input").attr("placeholder", null);
         // IE7 does not have quotes in innerHTML, trying to workaround this here.
         new_div.innerHTML = new_div.innerHTML.replace("=" + old_name + " ", "=" + new_name + " ");
         new_div.innerHTML = new_div.innerHTML.replace("=" + old_name + ">", "=" + new_name + ">");
@@ -962,8 +964,14 @@ export function update_unit_selector(selectbox, metric_prefix) {
             },
         });
     };
-    let metric_selector = $("#" + metric_prefix);
-    change_unit_to_match_metric(metric_selector.val());
+    const metric_selector = $("#" + metric_prefix);
+    const metric_selected = metric_selector.val();
+    // Only update unit info if no metric was selected before. This honors
+    // changed values in the unit section. Otherwise the default unit will
+    // always be set on editing a Gauge dashlet or the Metric history painter.
+    if (metric_selected === null) {
+        change_unit_to_match_metric(metric_selected);
+    }
     metric_selector.on("change", event => change_unit_to_match_metric(event.target.value));
 }
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -20,6 +20,7 @@ class RendererJSON : public Renderer {
 public:
     RendererJSON(std::ostream &os, Logger *logger, Encoding data_encoding);
 
+    [[nodiscard]] bool useSurrogatePairs() const override;
     void outputNull() override;
     void outputBlob(const std::vector<char> &value) override;
     void outputString(const std::string &value) override;

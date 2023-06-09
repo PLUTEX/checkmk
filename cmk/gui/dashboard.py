@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -102,6 +102,7 @@ from cmk.gui.plugins.dashboard.utils import (  # noqa: F401 # pylint: disable=un
     save_all_dashboards,
 )
 from cmk.gui.plugins.metrics.html_render import default_dashlet_graph_render_options
+from cmk.gui.plugins.metrics.utils import MKCombinedGraphLimitExceededError
 from cmk.gui.plugins.views.utils import data_source_registry
 from cmk.gui.plugins.visuals.utils import visual_info_registry, visual_type_registry, VisualType
 from cmk.gui.type_defs import InfoName, VisualContext
@@ -789,7 +790,7 @@ def _render_dashlet_content(
 
 
 def render_dashlet_exception_content(dashlet: Dashlet, e: Exception) -> HTMLInput:
-    if isinstance(e, MKMissingDataError):
+    if isinstance(e, (MKMissingDataError, MKCombinedGraphLimitExceededError)):
         return html.render_message(str(e))
 
     if not isinstance(e, MKUserError):
@@ -926,7 +927,7 @@ def _page_menu_dashboards(name) -> Iterable[PageMenuTopic]:
         title=_("Customize"),
         entries=[
             PageMenuEntry(
-                title=_("Customize dashboards"),
+                title=_("Edit dashboards"),
                 icon_name="dashboard",
                 item=make_simple_link("edit_dashboards.py"),
             )
@@ -991,7 +992,7 @@ def _dashboard_edit_entries(
         # edit mode using javascript, use the URL with edit=1. When this URL is opened,
         # the dashboard will be cloned for this user
         yield PageMenuEntry(
-            title=_("Customize builtin dashboard"),
+            title=_("Clone builtin dashboard"),
             icon_name="edit",
             item=make_simple_link(makeuri(request, [("edit", 1)])),
         )

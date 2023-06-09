@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -23,7 +23,7 @@ checks = {
     '': [
         (
             'DB19.CDB$ROOT.ORACLE_OCM.MGMT_STATS_CONFIG_JOB', {
-                'disabled': True,
+                'consider_job_status': 'ignore',
                 'status_missing_jobs': 2,
                 'missinglog': 1
             }, [

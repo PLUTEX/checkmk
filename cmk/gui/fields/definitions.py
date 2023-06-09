@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """A few upgraded Fields which handle some OpenAPI validation internally."""
@@ -34,10 +34,10 @@ from cmk.utils.livestatus_helpers.types import Column, Table
 from cmk.gui import sites, watolib
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.fields.base import BaseSchema, MultiNested, ValueTypedDictSchema
-from cmk.gui.fields.utils import attr_openapi_schema, collect_attributes, ObjectContext, ObjectType
+from cmk.gui.fields.utils import attr_openapi_schema, ObjectContext, ObjectType
 from cmk.gui.globals import user
 from cmk.gui.groups import GroupName, GroupType, load_group_information
-from cmk.gui.sites import allsites
+from cmk.gui.sites import configured_sites
 from cmk.gui.watolib.passwords import contact_group_choices, password_exists
 
 from cmk.fields import base, DateTime
@@ -575,7 +575,18 @@ class HostField(base.String):
             if self._should_exist and not host:
                 raise self.make_error("should_exist", host_name=value)
 
-            if not self._should_exist and host:
+            if (
+                self._should_exist and host is not None and not host.may("read")
+            ):  # host is there but user isn't allowed see it
+                # TODO: This is probably the wrong Exception Type to use here.
+                # TODO: We're adressing this in CMK-13171
+                raise MKUserError(
+                    varname=None,
+                    message=f"You don't have access to this host: {value!r}",
+                    status=403,
+                )
+
+            if not self._should_exist and host is not None:
                 raise self.make_error("should_not_exist", host_name=value)
 
         if self._should_be_cluster is not None and (host := watolib.Host.host(value)) is not None:
@@ -786,7 +797,6 @@ def attributes_field(
     required: bool = False,
     load_default: Any = utils.missing,
     many: bool = False,
-    names_only: bool = False,
 ) -> _fields.Field:
     """Build an Attribute Field
 
@@ -795,7 +805,7 @@ def attributes_field(
             May be one of 'folder', 'host' or 'cluster'.
 
         object_context:
-            May be 'create' or 'update'. Deletion is considered as 'update'.
+            May be 'create', 'update' or 'view'. Deletion is considered as 'update'.
 
         direction:
             If the data is *coming from* the user (inbound) or *going to* the user (outbound).
@@ -812,9 +822,6 @@ def attributes_field(
         load_default:
         many:
 
-        names_only:
-            When set to True, the field will be a List of Strings which validate the tag names only.
-
     Returns:
 
     """
@@ -823,33 +830,18 @@ def attributes_field(
         # clarify this here by force.
         raise ValueError("description is necessary.")
 
-    if not names_only:
-        return MultiNested(
-            [
-                attr_openapi_schema(object_type, object_context),
-                CustomAttributes,
-                TagGroupAttributes,
-            ],
-            metadata={"context": {"object_context": object_context, "direction": direction}},
-            merged=True,  # to unify both models
-            description=description,
-            example=example,
-            many=many,
-            load_default=dict if load_default is utils.missing else utils.missing,
-            required=required,
-        )
-
-    attrs = {attr.name for attr in collect_attributes(object_type, object_context)}
-
-    def validate(value):
-        if value not in attrs:
-            raise ValidationError(f"Unknown attribute: {value!r}")
-
-    return base.List(
-        base.String(validate=validate),
+    return MultiNested(
+        [
+            attr_openapi_schema(object_type, object_context),
+            CustomAttributes,
+            TagGroupAttributes,
+        ],
+        metadata={"context": {"object_context": object_context, "direction": direction}},
+        merged=True,  # to unify both models
         description=description,
         example=example,
-        load_default=load_default,
+        many=many,
+        load_default=dict if load_default is utils.missing else utils.missing,
         required=required,
     )
 
@@ -857,11 +849,37 @@ def attributes_field(
 class SiteField(base.String):
     """A field representing a site name."""
 
-    default_error_messages = {"unknown_site": "Unknown site {site!r}"}
+    default_error_messages = {
+        "should_exist": "The site {site!r} should exist but it doesn't.",
+        "should_not_exist": "The site {site!r} should not exist but it does.",
+    }
+
+    def __init__(
+        self,
+        presence: typing.Literal[
+            "should_exist", "should_not_exist", "might_not_exist", "ignore"
+        ] = "should_exist",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.presence = presence
 
     def _validate(self, value):
-        if value not in allsites().keys():
-            raise self.make_error("unknown_site", site=value)
+        if self.presence == "might_not_exist":
+            return
+
+        if self.presence == "should_exist":
+            if value not in configured_sites().keys():
+                raise self.make_error("should_exist", site=value)
+
+        if self.presence == "should_not_exist":
+            if value in configured_sites().keys():
+                raise self.make_error("should_not_exist", site=value)
+
+    def _serialize(self, value, attr, obj, **kwargs):
+        if self.presence == "might_not_exist" and value not in configured_sites().keys():
+            return "Unknown Site: " + value
+        return super()._serialize(value, attr, obj, **kwargs)
 
 
 def customer_field(**kw):

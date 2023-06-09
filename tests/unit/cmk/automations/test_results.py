@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from cmk.utils.type_defs import DiscoveryResult as SingleHostDiscoveryResult
-from cmk.utils.version import is_raw_edition
+from cmk.utils.version import __version__, is_raw_edition, parse_check_mk_version
 
 from cmk.automations.results import (
     ABCAutomationResult,
@@ -19,6 +19,8 @@ from cmk.automations.results import (
 )
 
 from cmk.base.automations import automations
+
+_THIS_VERSION = parse_check_mk_version(__version__)
 
 
 def test_result_type_registry_completeness() -> None:
@@ -57,7 +59,9 @@ def test_serialization() -> None:
             "123": "456",
         },
     )
-    assert automation_res_test == AutomationResultTest.deserialize(automation_res_test.serialize())
+    assert automation_res_test == AutomationResultTest.deserialize(
+        automation_res_test.serialize(_THIS_VERSION)
+    )
 
 
 class TestDiscoveryResult:
@@ -92,7 +96,7 @@ class TestDiscoveryResult:
 
     def test_serialization(self):
         assert DiscoveryResult.deserialize(
-            DiscoveryResult(self.HOSTS).serialize()
+            DiscoveryResult(self.HOSTS).serialize(_THIS_VERSION)
         ) == DiscoveryResult(self.HOSTS)
 
 
@@ -102,8 +106,8 @@ class TestTryDiscoveryResult:
             output="output",
             check_table=[
                 CheckPreviewEntry(
-                    check_source="check_source",
-                    check_plugin_name="check_plugin_name",
+                    check_source="my_check_source",
+                    check_plugin_name="my_check_plugin_name",
                     ruleset_name=None,
                     item=None,
                     discovered_parameters=None,
@@ -120,5 +124,6 @@ class TestTryDiscoveryResult:
             new_labels={},
             vanished_labels={},
             changed_labels={},
+            host_labels_by_host={},
         )
-        assert TryDiscoveryResult.deserialize(result.serialize()) == result
+        assert TryDiscoveryResult.deserialize(result.serialize(_THIS_VERSION)) == result

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -727,3 +727,18 @@ def init_rowselect(selection_key: str) -> None:
         "selected_rows": selected,
     }
     html.javascript("cmk.selection.init_rowselect(%s);" % (json.dumps(selection_properties)))
+
+
+def show_row_count(
+    row_count: int,
+    row_info: str,
+    selection_id: Optional[str] = None,
+) -> None:
+    """
+    Shows the row count on top of a table.
+    Needs empty div "row_id" set before the table.
+    """
+    row_info = "%d %s" % (row_count, row_info)
+    html.javascript("cmk.utils.update_row_info(%s);" % json.dumps(row_info))
+    if selection_id is not None:
+        init_rowselect(selection_id)

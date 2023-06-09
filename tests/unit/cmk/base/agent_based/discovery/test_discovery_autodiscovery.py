@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -39,6 +39,15 @@ class TestAutodiscoveryQueue:
         autodiscovery_queue = discovery._AutodiscoveryQueue()
         autodiscovery_queue.add("most")
         assert list(autodiscovery_queue.queued_hosts()) == ["most"]
+
+    def test_add_existing(self, autodiscovery_queue, mocker):
+        autodiscovery_queue = discovery._AutodiscoveryQueue()
+        autodiscovery_queue.add("most")
+
+        mock_touch = mocker.patch.object(discovery.Path, "touch")
+        autodiscovery_queue.add("most")
+
+        mock_touch.assert_not_called()
 
     def test_remove(self, autodiscovery_queue, monkeypatch):
         autodiscovery_queue.remove("lost")

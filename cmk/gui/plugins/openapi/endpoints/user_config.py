@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Users"""
@@ -8,6 +8,7 @@ import datetime as dt
 import time
 from typing import Any, Dict, Literal, Optional, Tuple, TypedDict, Union
 
+from cmk.utils.crypto.password import Password
 from cmk.utils.type_defs import UserId
 
 import cmk.gui.plugins.userdb.htpasswd as htpasswd
@@ -27,7 +28,7 @@ from cmk.gui.plugins.openapi.restful_objects.parameters import USERNAME
 from cmk.gui.plugins.openapi.utils import problem, ProblemException, serve_json
 from cmk.gui.type_defs import UserSpec
 from cmk.gui.watolib.custom_attributes import load_custom_attrs_from_mk_file
-from cmk.gui.watolib.users import delete_users, edit_users
+from cmk.gui.watolib.users import delete_users, edit_users, verify_password_policy
 
 from .host_config import _except_keys
 
@@ -177,7 +178,15 @@ def edit_user(params):
     # last_pw_change & serial must be changed manually if edit happens
     username = params["username"]
     api_attrs = params["body"]
-    internal_attrs = _api_to_internal_format(_load_user(username), api_attrs)
+
+    try:
+        internal_attrs = _api_to_internal_format(_load_user(username), api_attrs)
+    except KeyError:
+        return problem(
+            status=404,
+            title=f'User "{username}" is not known.',
+            detail="The user to edit does not exist. Please check for eventual misspellings.",
+        )
 
     if "password" in internal_attrs:
         # increase serial if password is there (regardless if there is a password change or not)
@@ -311,7 +320,7 @@ def _idle_options_to_api_format(internal_attributes: UserSpec) -> dict[str, dict
     if "idle_timeout" in internal_attributes:
         idle_option = internal_attributes["idle_timeout"]
         if idle_option:
-            idle_details = {"option": "individual", "duration": idle_option["duration"]}
+            idle_details = {"option": "individual", "duration": idle_option}
         else:  # False
             idle_details = {"option": "disable"}
     else:
@@ -409,7 +418,11 @@ AuthOptions = TypedDict(
 )
 
 
-def _update_auth_options(internal_attrs, auth_options: AuthOptions, new_user=False):
+def _update_auth_options(
+    internal_attrs: Dict[str, Union[int, str, bool]],
+    auth_options: AuthOptions,
+    new_user: bool = False,
+) -> Dict[str, Union[int, str, bool]]:
     if not auth_options:
         return internal_attrs
 
@@ -417,11 +430,17 @@ def _update_auth_options(internal_attrs, auth_options: AuthOptions, new_user=Fal
         internal_attrs.pop("automation_secret", None)
         internal_attrs.pop("password", None)
     else:
-        internal_auth_attrs = _auth_options_to_internal_format(auth_options, new_user)
+        internal_auth_attrs = _auth_options_to_internal_format(auth_options)
+        if new_user and "password" not in internal_auth_attrs:
+            # "password" (the password hash) is set for both automation users and regular users,
+            # although automation users don't really use it yet (but they should, eventually).
+            raise MKUserError(None, "No authentication details provided for new user")
+
         if internal_auth_attrs:
             if "automation_secret" not in internal_auth_attrs:  # new password
                 internal_attrs.pop("automation_secret", None)
-            # Note: changing from password to automation secret leaves enforce_pw_change
+            # Note: Changing from password to automation secret leaves enforce_pw_change, although
+            #       it will be ignored for automation users.
             internal_attrs.update(internal_auth_attrs)
 
             if internal_auth_attrs.get("enforce_password_change"):
@@ -431,9 +450,7 @@ def _update_auth_options(internal_attrs, auth_options: AuthOptions, new_user=Fal
     return internal_attrs
 
 
-def _auth_options_to_internal_format(
-    auth_details: AuthOptions, new_user: bool = False
-) -> Dict[str, Union[int, str, bool]]:
+def _auth_options_to_internal_format(auth_details: AuthOptions) -> Dict[str, Union[int, str, bool]]:
     """Format the authentication information to be Checkmk compatible
 
     Args:
@@ -443,30 +460,71 @@ def _auth_options_to_internal_format(
     Returns:
         formatted authentication details for Checkmk user_attrs
 
-    Example:
-    >>> _auth_options_to_internal_format({"auth_type": "automation", "secret": "TNBJCkwane3$cfn0XLf6p6a"})  # doctest:+ELLIPSIS
-    {'automation_secret': 'TNBJCkwane3$cfn0XLf6p6a', 'password': ...}
+    Examples:
 
-    >>> _auth_options_to_internal_format({"auth_type": "password", "password": "password"})  # doctest:+ELLIPSIS
-    {'password': ..., 'last_pw_change': ...}
+    Setting a new automation secret:
+
+        >>> _auth_options_to_internal_format(
+        ...     {"auth_type": "automation", "secret": "TNBJCkwane3$cfn0XLf6p6a"}
+        ... )  # doctest:+ELLIPSIS
+        {'password': ..., 'automation_secret': 'TNBJCkwane3$cfn0XLf6p6a', 'last_pw_change': ...}
+
+    Enforcing password change without changing the password:
+
+        >>> _auth_options_to_internal_format(
+        ...     {"auth_type": "password", "enforce_password_change": True}
+        ... )
+        {'enforce_pw_change': True}
+
+    Empty password is not allowed and passwords result in MKUserErrors:
+
+        >>> _auth_options_to_internal_format(
+        ...     {"auth_type": "password", "enforce_password_change": True, "password": ""}
+        ... )
+        Traceback (most recent call last):
+        ...
+        cmk.gui.exceptions.MKUserError: Password must not be empty
+
+        >>> _auth_options_to_internal_format(
+        ...     {"auth_type": "password", "enforce_password_change": True, "password": "\\0"}
+        ... )
+        Traceback (most recent call last):
+        ...
+        cmk.gui.exceptions.MKUserError: Password must not contain null bytes
     """
     internal_options: Dict[str, Union[str, bool, int]] = {}
     if not auth_details:
         return internal_options
 
-    # Note: Use the htpasswd wrapper for hash_password below, so we get MKUserError if anything
-    #       goes wrong.
-    if auth_details["auth_type"] == "automation":
-        secret = auth_details["secret"]
-        internal_options["automation_secret"] = secret
-        internal_options["password"] = htpasswd.hash_password(secret)
-    else:  # password
-        if new_user or "password" in auth_details:
-            internal_options["password"] = htpasswd.hash_password(auth_details["password"])
-            internal_options["last_pw_change"] = int(time.time())
+    auth_type = auth_details["auth_type"]
+    assert auth_type in ["automation", "password"]  # assuming remove was handled above...
 
-        if "enforce_password_change" in auth_details:
-            internal_options["enforce_pw_change"] = auth_details["enforce_password_change"]
+    password_field: Literal["secret", "password"] = (
+        "secret" if auth_type == "automation" else "password"
+    )
+    if password_field in auth_details:
+        try:
+            password = Password(auth_details[password_field])
+        except ValueError as e:
+            raise MKUserError(password_field, str(e))
+
+        # Re-using the htpasswd wrapper for hash_password here, so we get MKUserErrors.
+        internal_options["password"] = htpasswd.hash_password(password)
+
+        if auth_type == "password":
+            verify_password_policy(password)
+
+        if auth_type == "automation":
+            internal_options["automation_secret"] = password.raw
+
+        # In contrast to enforce_pw_change, the maximum password age is enforced for automation
+        # users as well. So set this for both kinds of users.
+        internal_options["last_pw_change"] = int(time.time())
+
+    if "enforce_password_change" in auth_details:
+        # Note that enforce_pw_change cannot be set for automation users. We rely on the schema to
+        # ensure that.
+        internal_options["enforce_pw_change"] = auth_details["enforce_password_change"]
 
     return internal_options
 

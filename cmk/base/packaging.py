@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -18,12 +18,17 @@ import cmk.utils.tty as tty
 import cmk.utils.werks
 from cmk.utils.log import VERBOSE
 from cmk.utils.packaging import (
+    format_file_name,
     get_config_parts,
+    get_enabled_package_infos,
     get_initial_package_info,
+    get_installed_package_infos,
+    get_optional_package_infos,
     get_package_parts,
     package_dir,
     PACKAGE_EXTENSION,
     PackageException,
+    PackageInfo,
     parse_package_info,
     read_package_info,
     unpackaged_files,
@@ -41,20 +46,20 @@ def packaging_usage() -> None:
         """Usage: check_mk [-v] -P|--package COMMAND [ARGS]
 
 Available commands are:
-   create NAME      ...  Collect unpackaged files into new package NAME
-   pack NAME        ...  Create package file from installed package
-   release NAME     ...  Drop installed package NAME, release packaged files
-   find             ...  Find and display unpackaged files
-   list             ...  List all installed packages
-   list NAME        ...  List files of installed package
-   list PACK.mkp    ...  List files of uninstalled package file
-   show NAME        ...  Show information about installed package
-   show PACK.mkp    ...  Show information about uninstalled package file
-   install PACK.mkp ...  Install or update package from file PACK.mkp
-   remove NAME      ...  Uninstall package NAME
-   disable NAME     ...  Disable package NAME
-   enable NAME      ...  Enable previously disabled package NAME
-   disable-outdated ...  Disable outdated packages
+   create NAME             ...  Collect unpackaged files into new package NAME
+   pack NAME               ...  Create package file from installed package
+   release NAME            ...  Drop installed package NAME, release packaged files
+   find                    ...  Find and display unpackaged files
+   list                    ...  Show a table of all known packages
+   list NAME               ...  List files of installed package
+   list PACK.mkp           ...  List files of uninstalled package file
+   show NAME               ...  Show information about installed package
+   show PACK.mkp           ...  Show information about uninstalled package file
+   install PACK.mkp        ...  Install or update package from file PACK.mkp
+   remove NAME VERSION     ...  Uninstall and delete package NAME
+   disable NAME [VERSION]  ...  Disable package NAME
+   enable NAME VERSION     ...  Enable previously disabled package NAME
+   disable-outdated        ...  Disable outdated packages
 
    -v  enables verbose output
 
@@ -104,21 +109,42 @@ def package_list(args: List[str]) -> None:
     if len(args) > 0:
         for name in args:
             show_package_contents(name)
-    else:
-        if logger.isEnabledFor(VERBOSE):
-            table = []
-            for pacname in packaging.installed_names():
-                package = read_package_info(pacname)
-                if package is None:
-                    table.append([pacname, "package info is missing or broken", "0"])
-                else:
-                    table.append(
-                        [pacname, package["title"], str(packaging.package_num_files(package))]
-                    )
-            tty.print_table(["Name", "Title", "Files"], [tty.bold, "", ""], table)
-        else:
-            for pacname in packaging.installed_names():
-                sys.stdout.write("%s\n" % pacname)
+        return
+
+    optional = {(p["name"], p["version"]): p for p in get_optional_package_infos().values()}
+    enabled = {(p["name"], p["version"]): p for p in get_enabled_package_infos().values()}
+    installed = {
+        (p["name"], p["version"]): p
+        for p in get_installed_package_infos().values()
+        if p is not None
+    }
+
+    tty.print_table(
+        ["Name", "Version", "Title", "Author", "Req. Version", "Until Version", "Files", "State"],
+        ["", "", "", "", "", "", "", ""],
+        [
+            *(_row(m, "Enabled (active on this site)") for m in installed.values()),
+            *(
+                _row(m, "Enabled (inactive on this site)")
+                for id_, m in enabled.items()
+                if id_ not in installed
+            ),
+            *(_row(m, "Disabled") for id_, m in optional.items() if id_ not in enabled),
+        ],
+    )
+
+
+def _row(manifest: PackageInfo, state: str) -> list[str]:
+    return [
+        str(manifest["name"]),
+        str(manifest["version"]),
+        str(manifest["title"]),
+        str(manifest["author"]),
+        str(manifest["version.min_required"]),
+        str(manifest["version.usable_until"]),
+        str(sum(len(f) for f in manifest["files"].values())),
+        state,
+    ]
 
 
 def package_info(args: List[str]) -> None:
@@ -277,16 +303,17 @@ def package_pack(args: List[str]) -> None:
 
 
 def package_remove(args: List[str]) -> None:
-    if len(args) != 1:
-        raise PackageException("Usage: check_mk -P remove NAME")
-    pacname = args[0]
-    package = read_package_info(pacname)
-    if not package:
-        raise PackageException("No such package %s." % pacname)
+    if len(args) != 2:
+        raise PackageException("Usage: check_mk -P remove NAME VERSION")
+    name, version = args
 
-    logger.log(VERBOSE, "Uninstalling package %s...", pacname)
-    packaging.uninstall(package)
-    logger.log(VERBOSE, "Successfully uninstalled package %s.", pacname)
+    for package in get_enabled_package_infos().values():
+        if package["name"] == name and package["version"] == version:
+            raise PackageException("This package is enabled! Please disable it first.")
+
+    logger.log(VERBOSE, "Removing package %s...", name)
+    packaging.remove_optional_package(format_file_name(name=name, version=version))
+    logger.log(VERBOSE, "Successfully removed package %s.", name)
 
 
 def package_install(args: List[str]) -> None:
@@ -305,21 +332,17 @@ def package_install(args: List[str]) -> None:
 
 
 def package_disable(args: List[str]) -> None:
-    if len(args) != 1:
-        raise PackageException("Usage: check_mk -P disable NAME")
+    if len(args) not in {1, 2}:
+        raise PackageException("Usage: check_mk -P disable NAME [VERSION]")
     package_name = args[0]
-    packaging.disable(package_name)
+    package_version = args[1] if len(args) == 2 else None
+    packaging.disable(package_name, package_version)
 
 
 def package_enable(args: List[str]) -> None:
-    if len(args) != 1:
-        raise PackageException("Usage: check_mk -P enable NAME")
-    package = read_package_info(args[0])
-    if not package:
-        raise PackageException("No such package %s." % args[0])
-    packaging.install_optional_package(
-        packaging.format_file_name(name=package["name"], version=package["version"])
-    )
+    if len(args) != 2:
+        raise PackageException("Usage: check_mk -P enable NAME VERSION")
+    packaging.install_optional_package(packaging.format_file_name(name=args[0], version=args[1]))
 
 
 def package_disable_outdated(args: List[str]) -> None:

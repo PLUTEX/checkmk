@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -32,6 +32,10 @@ check_metrics["check_icmp"] = {
     "~.*rta": {"scale": m},
     "~.*rtmax": {"scale": m},
     "~.*rtmin": {"scale": m},
+}
+# May be provided by an check_ping check configured as mrpe
+check_metrics["check_ping"] = {
+    "~.*rta": {"scale": m},
 }
 check_metrics["check_tcp"] = {
     "time": {"name": "response_time"},
@@ -407,6 +411,7 @@ df_basic_perfvarnames = [
     "overprovisioned",
     "dedup_rate",
     "file_count",
+    "fs_used_renamed_legacy_records",
 ]
 df_translation: Dict[str, CheckMetricEntry] = {
     "~(?!%s).*$"
@@ -477,6 +482,7 @@ check_metrics["check_mk-dell_compellent_folder"] = df_translation
 check_metrics["check_mk-nimble_volumes"] = df_translation
 check_metrics["check_mk-ceph_df"] = df_translation
 check_metrics["check_mk-lvm_vgs"] = df_translation
+check_metrics["check_mk-df_netscaler"] = df_translation
 
 check_metrics["check_mk-netapp_api_volumes"] = {
     "fs_used": {"scale": MB},

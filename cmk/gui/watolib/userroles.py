@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -32,7 +32,12 @@ def clone_role(role_id: RoleID) -> UserRole:
     while newalias in {role.alias for role in all_roles.values()}:
         newalias += _(" (copy)")
 
-    cloned_user_role = UserRole(name=new_role_id, basedon=role_to_clone.name, alias=newalias)
+    cloned_user_role = UserRole(
+        name=new_role_id,
+        basedon=role_to_clone.basedon or role_to_clone.name,
+        alias=newalias,
+        permissions=role_to_clone.permissions,
+    )
     all_roles[RoleID(new_role_id)] = cloned_user_role
     save_all_roles(all_roles)
 

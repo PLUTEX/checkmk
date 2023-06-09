@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """These functions implement a web service with that a master can call
@@ -187,11 +187,12 @@ class ModeAutomation(AjaxPage):
         cmk_command: str,
         cmdline_cmd: Iterable[str],
     ) -> str:
+        result = result_type_registry[cmk_command].deserialize(serialized_result)
         try:
             return (
-                repr(result_type_registry[cmk_command].deserialize(serialized_result).to_pre_21())
+                repr(result.to_pre_21())
                 if watolib.remote_automation_call_came_from_pre21()
-                else serialized_result
+                else result.serialize(watolib.remote_automation_caller_version())
             )
         except SyntaxError as e:
             raise watolib.local_automation_failure(

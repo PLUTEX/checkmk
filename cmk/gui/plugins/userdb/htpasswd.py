@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import cmk.utils.paths
 from cmk.utils.crypto import password_hashing
+from cmk.utils.crypto.password import Password
 from cmk.utils.store.htpasswd import Htpasswd
 from cmk.utils.type_defs import UserId
 
@@ -36,7 +37,7 @@ from cmk.gui.type_defs import UserSpec
 # - https://httpd.apache.org/docs/2.4/misc/password_encryptions.html
 # - https://passlib.readthedocs.io/en/stable/lib/passlib.apache.html
 #
-def hash_password(password: str) -> str:
+def hash_password(password: Password) -> str:
     """Hash a password
 
     Invalid inputs raise MKUserError.
@@ -77,7 +78,7 @@ class HtpasswdUserConnector(UserConnector):
     def is_enabled(self) -> bool:
         return True
 
-    def check_credentials(self, user_id: UserId, password: str) -> CheckCredentialsResult:
+    def check_credentials(self, user_id: UserId, password: Password) -> CheckCredentialsResult:
         if not (pw_hash := self._htpasswd.get_hash(user_id)):
             return None  # not user in htpasswd, skip so other connectors can try
 

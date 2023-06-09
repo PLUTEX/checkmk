@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -9,6 +9,7 @@ from typing import Iterator
 
 import pytest
 
+from tests.testlib.rest_api_client import RestApiClient
 from tests.testlib.site import Site
 
 test_plugin_code = """
@@ -47,3 +48,8 @@ def test_load_openapi_plugin(site: Site, test_script: str) -> None:
         subprocess.check_output(["python3", site.path(test_script)], encoding="utf-8").rstrip()
         == "True"
     )
+
+
+def test_openapi_ruleset_search_fulltext_crash_regression(rest_api_client: RestApiClient) -> None:
+    """A fulltext search shouldn't crash the endpoint."""
+    rest_api_client.list_rulesets(fulltext="cluster").assert_status_code(200)

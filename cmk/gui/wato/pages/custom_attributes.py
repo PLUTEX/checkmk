@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Mange custom attributes of users and hosts"""
@@ -42,6 +42,7 @@ from cmk.gui.watolib.custom_attributes import (
     update_user_custom_attrs,
 )
 from cmk.gui.watolib.host_attributes import host_attribute_topic_registry
+from cmk.gui.watolib.users import remove_custom_attribute_from_all_users
 
 
 def custom_attr_types() -> Choices:
@@ -462,11 +463,12 @@ class ModeCustomAttrs(WatoMode, abc.ABC):
         if not request.var("_delete"):
             return redirect(self.mode_url())
 
-        delname = request.var("_delete")
+        delname = request.get_ascii_input_mandatory("_delete")
         for index, attr in enumerate(self._attrs):
             if attr["name"] == delname:
                 self._attrs.pop(index)
         save_custom_attrs_to_mk_file(self._all_attrs)
+        remove_custom_attribute_from_all_users(delname)
         self._update_config()
         add_change("edit-%sattrs" % self._type, _("Deleted attribute %s") % (delname))
         return redirect(self.mode_url())

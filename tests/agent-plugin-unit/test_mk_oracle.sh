@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -27,6 +27,16 @@ oneTimeSetUp () {
     pwd() { echo "check_mk_agent/plugins"; }
 
     set_os_env
+
+    # Fake the sqlplus binary
+    ORACLE_HOME=${SHUNIT_TMPDIR}/ora_home
+    FAKE_SQLPLUS=${ORACLE_HOME}/bin/sqlplus
+    mkdir -p ${ORACLE_HOME}/bin
+    cat <<EOF >"${FAKE_SQLPLUS}"
+echo "SQL*Plus: Release 19.2.3.4.5 - Production
+Version 19.3.0.0.0"
+EOF
+    chmod +x ${FAKE_SQLPLUS}
 
     # Overwrite functions from mk_oracle which cannot/won't be unit tested for now
     mk_ora_sqlplus () { true; }
@@ -81,6 +91,41 @@ tearDown () {
 }
 
 # .
+
+#   ---helpers-------------------------------------------------------------
+
+test_get_sqlplus_version_with_precision() {
+    sqlplus_version="$(get_sqlplus_version_with_precision 5)"
+    assertEquals "19.2.3.4.5" "${sqlplus_version}"
+
+    sqlplus_version="$(get_sqlplus_version_with_precision 2)"
+    assertEquals "19.2" "${sqlplus_version}"
+}
+
+test_mk_oracle_set_ora_version() {
+    # Get version via sqlplus
+    set_ora_version
+    assertEquals "192" "${NUMERIC_ORACLE_VERSION}"
+    assertEquals "19234" "${NUMERIC_ORACLE_VERSION_FOUR_PARTS}"
+
+    # Get version with remote instances
+    REMOTE_INSTANCE="<user>:<password>:<role>:<host>:<port>:<piggybackhost>:<sid>:12.3:<tnsalias>"
+    set_ora_version $( echo "${REMOTE_INSTANCE}" | cut -d":" -f8)
+    assertEquals "123" "${NUMERIC_ORACLE_VERSION}"
+    assertEquals "123" "${NUMERIC_ORACLE_VERSION_FOUR_PARTS}"
+
+    REMOTE_INSTANCE="<user>:<password>:<role>:<host>:<port>:<piggybackhost>:<sid>:12.3.4.5:<tnsalias>"
+    set_ora_version $( echo "${REMOTE_INSTANCE}" | cut -d":" -f8)
+    assertEquals "123" "${NUMERIC_ORACLE_VERSION}"
+    assertEquals "12345" "${NUMERIC_ORACLE_VERSION_FOUR_PARTS}"
+
+    # Get version from env test variable
+    MK_ORA_TESTVERSION="18.1"
+    set_ora_version "${ORACLE_VERSION}"
+    assertEquals "181" "${NUMERIC_ORACLE_VERSION}"
+    assertEquals "181" "${NUMERIC_ORACLE_VERSION_FOUR_PARTS}"
+
+}
 
 #   ---load_config----------------------------------------------------------
 

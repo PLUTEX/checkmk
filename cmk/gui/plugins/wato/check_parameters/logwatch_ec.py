@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -24,6 +24,7 @@ from cmk.gui.valuespec import (
     FixedValue,
     ListOf,
     ListOfStrings,
+    MonitoringState,
     NetworkPort,
     RegExp,
     TextInput,
@@ -473,6 +474,17 @@ def _parameter_valuespec_logwatch_ec():
                         ),
                     ),
                     (
+                        "monitor_logfile_access_state",
+                        MonitoringState(
+                            title=_("State if a logfile cannot be read"),
+                            default_value=2,
+                            help=_(
+                                "Choose the Checkmk state in case any of the forwarded logfiles "
+                                "cannot be read"
+                            ),
+                        ),
+                    ),
+                    (
                         "separate_checks",
                         Checkbox(
                             title=_("Create a separate check for each logfile"),
@@ -488,7 +500,11 @@ def _parameter_valuespec_logwatch_ec():
                     ),
                 ],
                 optional_keys=[
+                    "method",
+                    "facility",
                     "restrict_logfiles",
+                    "monitor_logfilelist",
+                    "monitor_logfile_access_state",
                     "expected_logfiles",
                     "logwatch_reclassify",
                     "separate_checks",

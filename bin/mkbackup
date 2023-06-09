@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -58,7 +58,7 @@ import cmk.utils.store as store
 from cmk.utils.exceptions import MKGeneralException, MKTerminate
 from cmk.utils.paths import mkbackup_lock_dir
 
-VERSION = "2.1.0p16"
+VERSION = "2.1.0p29"
 
 # Some typed wrappers around OpenSSL.crypto, there are only Python 2 interface
 # files available... :-/

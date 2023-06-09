@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Host status
@@ -15,7 +15,7 @@ How to use the query DSL used in the `query` parameters of these endpoints, have
 These endpoints support all [Livestatus filter operators](https://docs.checkmk.com/latest/en/livestatus_references.html#heading_filter),
 which you can look up in the Checkmk documentation.
 
-For a detailed list of columns, please take a look at the [hosts table](https://github.com/tribe29/checkmk/blob/master/cmk/gui/plugins/openapi/livestatus_helpers/tables/hosts.py)
+For a detailed list of columns, please take a look at the [hosts table](https://github.com/checkmk/checkmk/blob/master/cmk/gui/plugins/openapi/livestatus_helpers/tables/hosts.py)
 definition on GitHub.
 
 ### Examples
@@ -39,7 +39,10 @@ To search for hosts with specific tags set on them:
     {'op': '~', 'left': 'tag_names', 'right': 'windows'}
 
 """
-from cmk.utils.livestatus_helpers.queries import Query
+import ast
+from typing import Generator, Sequence
+
+from cmk.utils.livestatus_helpers.queries import Query, ResultRow
 from cmk.utils.livestatus_helpers.tables import Hosts
 
 from cmk.gui import fields as gui_fields
@@ -107,13 +110,18 @@ def list_hosts(param):
     if sites_to_query:
         live.only_sites = sites_to_query
 
-    q = Query(param["columns"])
+    columns = param["columns"]
+    q = Query(columns)
 
     query_expr = param.get("query")
     if query_expr:
         q = q.filter(query_expr)
 
     result = q.iterate(live)
+
+    # We have to special case the inventory column, as they as dicts stored as bytes in livestatus
+    if contains_an_inventory_colum(columns):
+        result = fixup_inventory_column(result)
 
     return serve_json(
         constructors.collection_object(
@@ -131,3 +139,22 @@ def list_hosts(param):
             ],
         )
     )
+
+
+INVENTORY_COLUMN = "mk_inventory"
+
+
+def contains_an_inventory_colum(columns: Sequence[str]) -> bool:
+    return INVENTORY_COLUMN in columns
+
+
+def fixup_inventory_column(
+    result: Generator[ResultRow, None, None]
+) -> Generator[ResultRow, None, None]:
+    for row in result:
+        if (inventory_data := row.get(INVENTORY_COLUMN)) is not None:
+            copy = dict(row)
+            copy[INVENTORY_COLUMN] = ast.literal_eval(inventory_data.decode("utf-8"))
+            yield ResultRow(copy)
+        else:
+            yield row

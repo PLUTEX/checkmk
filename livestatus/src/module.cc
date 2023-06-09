@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -420,7 +420,8 @@ void terminate_threads() {
         Informational(fl_logger_nagios)
             << "waiting for client threads to terminate...";
         fl_client_queue->join();
-        while (auto fd = fl_client_queue->try_pop()) {
+        while (auto fd =
+                   fl_client_queue->pop(queue_pop_strategy::nonblocking)) {
             ::close(*fd);
         }
         for (const auto &info : fl_thread_info) {
@@ -1028,7 +1029,7 @@ void livestatus_parse_arguments(Logger *logger, const char *args_orig) {
 }
 
 void omd_advertize(Logger *logger) {
-    Notice(logger) << "Livestatus by tribe29 GmbH started with PID "
+    Notice(logger) << "Livestatus by Checkmk GmbH started with PID "
                    << getpid();
     Notice(logger) << "version " << VERSION << " compiled " << BUILD_DATE
                    << " on " << BUILD_HOSTNAME;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -11,8 +11,6 @@ from typing import Any, Optional
 from marshmallow import fields as _fields
 from marshmallow import post_load, Schema
 from marshmallow_oneofschema import OneOfSchema  # type:ignore[import]
-
-from cmk.utils.defines import weekday_ids
 
 import cmk.gui.userdb as userdb
 from cmk.gui import fields as gui_fields
@@ -493,11 +491,25 @@ class CollectionItem(OneOfSchema):
     type_field_remove = False
 
 
+class HostTag(BaseSchema):
+    id = fields.String(description="The unique identifier of this host tag", allow_none=True)
+    title = fields.String(description="The title of this host tag")
+    aux_tags = fields.List(fields.String(), description="The auxiliary tags this tag included in.")
+
+
+class HostTagExtensions(BaseSchema):
+    topic = fields.String(description="The topic this host tag group is organized in.")
+    tags = fields.List(fields.Nested(HostTag()), description="The list of tags in this group.")
+
+
 class ConcreteHostTagGroup(DomainObject):
     domainType = fields.Constant(
         "host_tag_group",
         required=True,
         description="The domain type of the object.",
+    )
+    extensions = fields.Nested(
+        HostTagExtensions(), description="Additional fields for objects of this type."
     )
 
 
@@ -547,6 +559,17 @@ class FolderCollection(DomainObjectCollection):
     value = fields.List(
         fields.Nested(FolderSchema()),
         description="A list of folder objects.",
+    )
+
+
+class HostTagGroupCollection(DomainObjectCollection):
+    domainType = fields.Constant(
+        "host_tag_group",
+        description="The domain type of the objects in the collection.",
+    )
+    value = fields.List(
+        fields.Nested(ConcreteHostTagGroup()),
+        description="A list of host tag group objects.",
     )
 
 
@@ -818,56 +841,6 @@ class UserCollection(DomainObjectCollection):
     )
 
 
-TIME_FIELD = fields.String(
-    example="14:00",
-    format="time",
-    description="The hour of the time period.",
-)
-
-
-class ConcreteTimeRange(BaseSchema):
-    start = TIME_FIELD
-    end = TIME_FIELD
-
-
-class ConcreteTimeRangeActive(BaseSchema):
-    day = fields.String(
-        description="The day for which the time ranges are specified",
-        pattern=f"{'|'.join(weekday_ids())}",
-    )
-    time_ranges = fields.List(fields.Nested(ConcreteTimeRange))
-
-
-class ConcreteTimePeriodException(BaseSchema):
-    date = fields.String(
-        example="2020-01-01",
-        format="date",
-        description="The date of the time period exception." "8601 profile",
-    )
-    time_ranges = fields.List(
-        fields.Nested(ConcreteTimeRange),
-        example="[{'start': '14:00', 'end': '18:00'}]",
-    )
-
-
-class ConcreteTimePeriod(BaseSchema):
-    alias = fields.String(description="The alias of the time period", example="alias")
-    active_time_ranges = fields.List(
-        fields.Nested(ConcreteTimeRangeActive),
-        description="The days for which time ranges were specified",
-        example={"day": "all", "time_ranges": [{"start": "12:00", "end": "14:00"}]},
-    )
-    exceptions = fields.List(
-        fields.Nested(ConcreteTimePeriodException),
-        description="Specific day exclusions with their list of time ranges",
-        example=[{"date": "2020-01-01", "time_ranges": [{"start": "14:00", "end": "18:00"}]}],
-    )
-    exclude = fields.List(  # type: ignore[assignment]
-        fields.String(description="Name of excluding time period", example="holidays"),
-        description="The collection of time period aliases whose periods are excluded",
-    )
-
-
 class PasswordExtension(BaseSchema):
     ident = fields.String(
         example="pass",
@@ -919,6 +892,17 @@ class PasswordObject(DomainObject):
     extensions = fields.Nested(
         PasswordExtension,
         description="All the attributes of the domain object.",
+    )
+
+
+class PasswordCollection(DomainObjectCollection):
+    domainType = fields.Constant(
+        "password",
+        description="The domain type of the objects in the collection.",
+    )
+    value = fields.List(
+        fields.Nested(PasswordObject),
+        description="A list of password objects.",
     )
 
 
@@ -993,4 +977,22 @@ class HostConfigSchemaInternal(BaseSchema):
     is_cluster = fields.Boolean(
         required=True,
         description="Indicates if the host is a cluster host.",
+    )
+
+
+class AgentObject(DomainObject):
+    domainType = fields.Constant(
+        "agent",
+        description="The domain type of the object.",
+    )
+
+
+class AgentCollection(DomainObjectCollection):
+    domainType = fields.Constant(
+        "agent",
+        description="The domain type of the objects in the collection.",
+    )
+    value = fields.List(
+        fields.Nested(AgentObject),
+        description="A list of agent objects.",
     )

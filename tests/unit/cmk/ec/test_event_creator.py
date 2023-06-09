@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -320,6 +320,22 @@ from cmk.ec.event import (
                 "time": 1622642075.0,
             },
             id="variant 9: syslog message (RFC 5424) from logwatch forwarding",
+        ),
+        pytest.param(
+            r'<138>1 2022-11-22T12:36:46+00:00 sup-12385 - - - [Checkmk@18662 application="c:\\Users\\SA-Prd-RPAAdmin5\\AppData\\Local\\UiPath\\Logs\\2022-11-21_Execution.log"] error 16',
+            {
+                "application": "c:\\Users\\SA-Prd-RPAAdmin5\\AppData\\Local\\UiPath\\Logs\\2022-11-21_Execution.log",
+                "core_host": None,
+                "facility": 17,
+                "host": "sup-12385",
+                "host_in_downtime": False,
+                "ipaddress": "127.0.0.1",
+                "pid": 0,
+                "priority": 2,
+                "text": "error 16",
+                "time": 1669120606.0,
+            },
+            id="variant 9: syslog message (RFC 5424) from Windows logwatch forwarding",
         ),
         (
             # Variant 10:
@@ -641,12 +657,12 @@ def test_split_syslog_structured_data_and_message_exception(sd_and_message: str)
             id="no checkmk structured data",
         ),
         pytest.param(
-            r'[Checkmk@18662 sl="10" host="abc\\" def" application="[mean\]"]',
+            r'[Checkmk@18662 sl="10" host="abc\" def" application="[mean\]"]',
             (
                 {
                     "sl": "10",
-                    "host": r'abc\\" def',
-                    "application": r"[mean\]",
+                    "host": 'abc" def',
+                    "application": "[mean]",
                 },
                 "",
             ),

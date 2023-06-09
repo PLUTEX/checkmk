@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -26,6 +26,7 @@ from typing import (
 import cmk.base.plugins.agent_based.utils.eval_regex as eval_regex
 from cmk.base.plugins.agent_based.agent_based_api.v1 import (
     check_levels,
+    Metric,
     regex,
     render,
     Result,
@@ -330,11 +331,31 @@ def _fileinfo_check_function(
         if metric.value is None:
             continue
 
+        # if the age of the file is negative but falls within the negative_age_tolerance
+        # period, set the age to 0
+        tolerance = params.get("negative_age_tolerance", 0)
+        adjusted_metric_value = (
+            0
+            if "age" in metric.title.lower() and metric.value < 0 and abs(metric.value) <= tolerance
+            else metric.value
+        )
+
+        if "age" in metric.title.lower() and adjusted_metric_value < 0:
+            age = metric.verbose_func(abs(adjusted_metric_value))
+            message = (
+                "The timestamp of the file is in the future. Please investigate your host times"
+            )
+
+            yield Result(state=State.UNKNOWN, summary=f"{metric.title}: -{age}, {message}")
+            yield Metric(metric.key, adjusted_metric_value)
+
+            continue
+
         max_levels = params.get("max" + metric.key, (None, None))
         min_levels = params.get("min" + metric.key, (None, None))
 
         yield from check_levels(
-            metric.value,
+            adjusted_metric_value,
             levels_upper=max_levels,
             levels_lower=min_levels,
             metric_name=metric.key,
@@ -368,7 +389,7 @@ def check_fileinfo_data(
         else:
             age = reftime - file_info.time
             check_definition = [
-                MetricInfo("Size", "size", file_info.size, render.filesize),
+                MetricInfo("Size", "size", file_info.size, render.bytes),
                 MetricInfo("Age", "age", age, render.timespan),
             ]
             check_results = _fileinfo_check_function(check_definition, params)
@@ -452,9 +473,14 @@ def _check_individual_files(
     This is done to generate information for the long output.
     """
 
+    # if the age of the file is negative but falls within the negative_age_tolerance
+    # period, set the age to 0
+    tolerance = params.get("negative_age_tolerance", 0)
+    adjusted_file_age = 0 if file_age < 0 and abs(file_age) <= tolerance else file_age
+
     for key, value in [
-        ("age_oldest", file_age),
-        ("age_newest", file_age),
+        ("age_oldest", adjusted_file_age),
+        ("age_newest", adjusted_file_age),
         ("size_smallest", file_size),
         ("size_largest", file_size),
     ]:
@@ -471,8 +497,15 @@ def _check_individual_files(
     if skip_ok_files and State(overall_state) == State.OK:
         return
 
-    age = render.timespan(file_age)
-    size = render.filesize(file_size)
+    size = render.bytes(file_size)
+    age = render.timespan(abs(adjusted_file_age))
+
+    if adjusted_file_age < 0:
+        message = "The timestamp of the file is in the future. Please investigate your host times"
+        yield Result(
+            state=State.UNKNOWN, summary=f"[{file_name}] Age: -{age}, Size: {size}, {message}"
+        )
+        return
 
     yield Result(
         state=State.OK,
@@ -487,9 +520,9 @@ def _define_fileinfo_group_check(
     age_newest, age_oldest = files_matching["age_minmax"] or (None, None)
     return [
         MetricInfo("Count", "count", files_matching["count_all"], saveint),
-        MetricInfo("Size", "size", files_matching["size_all"], render.filesize),
-        MetricInfo("Largest size", "size_largest", size_largest, render.filesize),
-        MetricInfo("Smallest size", "size_smallest", size_smallest, render.filesize),
+        MetricInfo("Size", "size", files_matching["size_all"], render.bytes),
+        MetricInfo("Largest size", "size_largest", size_largest, render.bytes),
+        MetricInfo("Smallest size", "size_smallest", size_smallest, render.bytes),
         MetricInfo("Oldest age", "age_oldest", age_oldest, render.timespan),
         MetricInfo("Newest age", "age_newest", age_newest, render.timespan),
     ]
@@ -603,10 +636,13 @@ def check_fileinfo_groups_data(
             state=State.WARN, summary="Files with unknown stat: %s" % ", ".join(files_stat_failed)
         )
 
-    yield from _fileinfo_check_function(check_definition, params)
-
     outof_range_txt = fileinfo_check_timeranges(params)
+    check_results = _fileinfo_check_function(check_definition, params)
+
     if outof_range_txt:
         yield Result(state=State.OK, summary=outof_range_txt)
+        yield from change_results_state_to_ok(check_results)
+    else:
+        yield from check_results
 
     yield from _fileinfo_check_conjunctions(check_definition, params)

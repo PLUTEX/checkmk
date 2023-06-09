@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -78,7 +78,7 @@ from cmk.gui.hooks import request_memoize
 from cmk.gui.htmllib import HTML
 from cmk.gui.i18n import _
 from cmk.gui.log import logger
-from cmk.gui.sites import allsites, is_wato_slave_site
+from cmk.gui.sites import get_enabled_sites, is_wato_slave_site
 from cmk.gui.type_defs import HTTPVariables, SetOnceDict
 from cmk.gui.utils import urls
 from cmk.gui.valuespec import Choices
@@ -99,6 +99,7 @@ from cmk.gui.watolib.utils import (
     host_attribute_matches,
     HostContactGroupSpec,
     rename_host_in_list,
+    restore_snmp_community_tuple,
     try_bake_agents_for_hosts,
     wato_root_dir,
 )
@@ -899,6 +900,50 @@ class WithAttributes:
 class BaseFolder:
     """Base class of SearchFolder and Folder. Implements common methods"""
 
+    @staticmethod
+    def _normalize_folder_name(name: str) -> str:
+        """Transform the `name` to a filesystem friendly one.
+
+        >>> BaseFolder._normalize_folder_name("abc")
+        'abc'
+        >>> BaseFolder._normalize_folder_name("Äbc")
+        'aebc'
+        >>> BaseFolder._normalize_folder_name("../Äbc")
+        '___aebc'
+        """
+        converted = ""
+        for c in name.lower():
+            if c == "ä":
+                converted += "ae"
+            elif c == "ö":
+                converted += "oe"
+            elif c == "ü":
+                converted += "ue"
+            elif c == "ß":
+                converted += "ss"
+            elif c in "abcdefghijklmnopqrstuvwxyz0123456789-_":
+                converted += c
+            else:
+                converted += "_"
+        return converted
+
+    @staticmethod
+    def find_available_folder_name(candidate: str, parent: BaseFolder | None = None) -> str:
+        if parent is None:
+            parent = Folder.current()
+
+        basename = BaseFolder._normalize_folder_name(candidate)
+        c = 1
+        name = basename
+        while True:
+            try:
+                parent.subfolder(name)
+            except KeyError:
+                break
+            c += 1
+            name = "%s-%d" % (basename, c)
+        return name
+
     def hosts(self):
         raise NotImplementedError()
 
@@ -1387,6 +1432,7 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
         attributes = self._transform_tag_snmp_ds(attributes)
         attributes = self._transform_cgconf_attributes(attributes)
         attributes = self._cleanup_pre_210_hostname_attribute(attributes)
+        attributes = restore_snmp_community_tuple(attributes)
         return attributes
 
     def _transform_cgconf_attributes(self, attributes):
@@ -2538,14 +2584,17 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
 
         Folder.invalidate_caches()
 
-        # Reload folder at new location and rewrite host files
-        # Again, some special handling because of the missing slash in the main folder
-        if not target_folder.is_root():
-            moved_subfolder = Folder.folder(f"{target_folder.path()}/{subfolder.name()}")
-        else:
-            moved_subfolder = Folder.folder(subfolder.name())
-
+        # Since redis only updates on the next request, we can no longer use it here
+        # We COULD enforce a redis update here, but this would take too much time
+        # After the move action, the request is finished anyway.
         with disable_redis():
+            # Reload folder at new location and rewrite host files
+            # Again, some special handling because of the missing slash in the main folder
+            if not target_folder.is_root():
+                moved_subfolder = Folder.folder(f"{target_folder.path()}/{subfolder.name()}")
+            else:
+                moved_subfolder = Folder.folder(subfolder.name())
+
             # Do not update redis while rewriting a plethora of host files
             # Redis automatically updates on the next request
             moved_subfolder.rewrite_hosts_files()  # fixes changed inheritance
@@ -2851,21 +2900,25 @@ class CREFolder(WithPermissions, WithAttributes, WithUniqueIdentifier, BaseFolde
             subfolder._add_all_sites_to_set(site_ids)
 
     def _rewrite_hosts_file(self):
+        self._load_hosts_on_demand()
+
+        for host in self._hosts.values():
+            self._remove_unused_attributes(host)
+
+        self.save_hosts()
+
+    @staticmethod
+    def _remove_unused_attributes(host):
         UNUSED_ATTRIBUTES = [
             "snmp_v3_credentials",  # added by host diagnose page
             "hostname",  # added by host diagnose page
         ]
 
-        self._load_hosts_on_demand()
-
-        for host in self._hosts.values():
-            for attribute in UNUSED_ATTRIBUTES:
-                logger.debug("Rewriting %s", host.name())
-                if host.attribute(attribute, None):
-                    logger.debug("Removing attribute: %s", attribute)
-                    host.remove_attribute(attribute)
-
-        self.save_hosts()
+        for attribute in UNUSED_ATTRIBUTES:
+            logger.debug("Rewriting %s", host.name())
+            if host.attribute(attribute, None):
+                logger.debug("Removing attribute: %s", attribute)
+                host.remove_attribute(attribute)
 
     # .-----------------------------------------------------------------------.
     # | HTML Generation                                                       |
@@ -3685,7 +3738,7 @@ class CMEFolder(CREFolder):
                     "following sites <i>%s</i>."
                 )
                 % (
-                    allsites()[site_id]["alias"],
+                    get_enabled_sites()[site_id]["alias"],
                     self.title(),
                     managed.get_customer_name_by_id(customer_id),
                     folder_sites,
@@ -3711,7 +3764,7 @@ class CMEFolder(CREFolder):
                         )
                         % (
                             subfolder.title(),
-                            allsites()[subfolder_explicit_site]["alias"],
+                            get_enabled_sites()[subfolder_explicit_site]["alias"],
                             managed.get_customer_name_by_id(subfolder_customer),
                         ),
                     )
@@ -3733,7 +3786,7 @@ class CMEFolder(CREFolder):
                         )
                         % (
                             host.name(),
-                            allsites()[host_explicit_site]["alias"],
+                            get_enabled_sites()[host_explicit_site]["alias"],
                             managed.get_customer_name_by_id(host_customer),
                         ),
                     )
@@ -3795,7 +3848,7 @@ class CMEFolder(CREFolder):
                     )
                     % (
                         hostname,
-                        allsites()[attributes["site"]]["alias"],
+                        get_enabled_sites()[attributes["site"]]["alias"],
                         customer_id,
                         folder_sites,
                     ),
@@ -3825,7 +3878,7 @@ class CMEFolder(CREFolder):
                         )
                         % (
                             hostname,
-                            allsites()[host_site]["alias"],
+                            get_enabled_sites()[host_site]["alias"],
                             managed.get_customer_of_site(host_site),
                             managed.get_customer_of_site(target_site_id),
                         ),

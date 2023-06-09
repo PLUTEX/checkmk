@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -91,6 +91,28 @@ def test_host_labels_ps_match():
         (["test", "ps"], "ps", "~.*t$", True),
         (["test", "ps"], "sp", "~.*t$", False),
         (["root", "/sbin/init", "splash"], "/sbin/init", None, True),
+        ([None], None, "~.*y", False),
+        pytest.param(
+            ["test"],
+            None,
+            None,
+            True,
+            id="empty command line (SUP-13009), no matching",
+        ),
+        pytest.param(
+            ["test"],
+            "~^$",
+            None,
+            True,
+            id="empty command line (SUP-13009), matches",
+        ),
+        pytest.param(
+            ["test"],
+            "ps",
+            None,
+            False,
+            id="empty command line (SUP-13009), does not match",
+        ),
     ],
 )
 def test_process_matches(ps_line, ps_pattern, user_pattern, result):
@@ -98,7 +120,7 @@ def test_process_matches(ps_line, ps_pattern, user_pattern, result):
     matches_attr = ps.process_attributes_match(psi, user_pattern, (None, False))
     matches_proc = ps.process_matches(ps_line[1:], ps_pattern)
 
-    assert (matches_attr and matches_proc) == result
+    assert (matches_attr and bool(matches_proc)) == result
 
 
 @pytest.mark.parametrize(
@@ -198,7 +220,23 @@ def test_format_process_list(processes, formatted_list, html_flag):
     assert ps.format_process_list(processes, html_flag) == formatted_list
 
 
-def test_unused_value_remover():
+def test_format_process_list_html_backslash_replacement() -> None:
+    assert ps.format_process_list(
+        [
+            [
+                ("name", ("D:\\nginx", "")),
+                ("user", ("tim & struppi", "")),
+                ("arguments", ("", "")),
+            ]
+        ],
+        True,
+    ) == (
+        "<table><tr><th>name</th><th>user</th><th>arguments</th></tr>"
+        "<tr><td>D:&bsol;nginx</td><td>tim &amp; struppi</td><td></td></tr></table>"
+    )
+
+
+def test_unused_value_remover() -> None:
 
     value_store_test = {
         "test": {
@@ -335,7 +373,50 @@ def test_memory_perc_check_cluster():
                 ]
             ],
             id="process_info_args",
-        )
+        ),
+        pytest.param(
+            [
+                (
+                    None,
+                    ps.PsInfo(
+                        user="root",
+                        virtual=12856,
+                        physical=16160,
+                        cputime="0.0",
+                        process_id="1234",
+                        pagefile=None,
+                        usermode_time=None,
+                        kernelmode_time=None,
+                        handles=None,
+                        threads=None,
+                        uptime=None,
+                        cgroup=None,
+                    ),
+                    [
+                        "/usr/lib/firefox/firefox",
+                        "-contentproc",
+                        "-childID",
+                        "31",
+                        "-isForBrowser",
+                        "-prefsLen",
+                        "9681",
+                    ],
+                )
+            ],
+            {"process_info_arguments": 15},
+            [
+                [
+                    ("name", ("/usr/lib/firefox/firefox", "")),
+                    ("user", ("root", "")),
+                    ("virtual size", (12856, "kB")),
+                    ("resident size", (16160, "kB")),
+                    ("pid", ("1234", "")),
+                    ("cpu usage", (0.0, "%")),
+                    ("args", ("-contentproc -c", "")),
+                ]
+            ],
+            id="solaris_BSD_aix_pid",
+        ),
     ],
 )
 def test_process_capture(process_lines, params, expected_processes):

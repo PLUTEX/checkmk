@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -160,7 +160,7 @@ class SNMPFileCacheFactory(FileCacheFactory[SNMPRawData]):
             base_path=self.base_path,
             max_age=MaxAge.none() if force_cache_refresh else self.max_age,
             disabled=self.disabled,
-            use_outdated=False if force_cache_refresh else self.disabled,
+            use_outdated=False if force_cache_refresh else self.use_outdated,
             simulation=self.simulation,
         )
 

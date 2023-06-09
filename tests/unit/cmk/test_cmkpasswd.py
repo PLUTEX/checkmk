@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2022 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2022 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -11,18 +11,19 @@ from unittest.mock import patch
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
-from cmk.cmkpasswd import _run_cmkpasswd, InvalidPasswordError, main, VerificationError
+from cmk.utils.crypto.password import Password
+
+from cmk.cmkpasswd import _run_cmkpasswd, InvalidPasswordError, main
 
 
-def _get_pw(pw: str = "hunter2") -> Callable[[], str]:
-    return lambda: pw
+def _get_pw(pw: str = "hunter2") -> Callable[[], Password]:
+    return lambda: Password(pw)
 
 
 @pytest.mark.parametrize(
     "user,password",
     [
         ("testuser", "hunter2"),
-        ("", ""),
         ("unicode", "🙈 🙉 🙊"),
     ],
 )
@@ -54,11 +55,11 @@ def test_filenotfound(tmp_path: Path) -> None:
 
 
 def test_verification_error() -> None:
-    def raise_err() -> str:
-        raise VerificationError("test error")
+    def raise_err() -> Password:
+        raise ValueError("test error")
 
     # This basically only tests that the error is propagated from the get_password function
-    with pytest.raises(VerificationError, match="test error"):
+    with pytest.raises(ValueError, match="test error"):
         _run_cmkpasswd("testuser", raise_err, None)
 
 
@@ -67,7 +68,7 @@ def test_invalid_password() -> None:
         # This test will break if we switch from bcrypt.
         _run_cmkpasswd("testuser", _get_pw(73 * "a"), None)
 
-    with pytest.raises(InvalidPasswordError, match="NULL byte"):
+    with pytest.raises(InvalidPasswordError):
         # This test might break if we switch from bcrypt and start allowing
         # null bytes in passwords. More likely we'll continue to forbid these though.
         _run_cmkpasswd("testuser", _get_pw("null\0byte"), None)

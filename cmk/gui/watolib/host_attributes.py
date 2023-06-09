@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """A host attribute is something that is inherited from folders to
@@ -25,7 +25,7 @@ from cmk.gui.exceptions import MKGeneralException, MKUserError
 from cmk.gui.globals import config, html, request
 from cmk.gui.htmllib import HTML
 from cmk.gui.i18n import _, _u
-from cmk.gui.sites import allsites
+from cmk.gui.sites import get_enabled_sites
 from cmk.gui.type_defs import Choices
 from cmk.gui.utils import escaping
 from cmk.gui.valuespec import Checkbox, DropdownChoice, TextInput, Transform, ValueSpec
@@ -945,7 +945,7 @@ class ABCHostAttributeTag(ABCHostAttributeValueSpec, abc.ABC):
         return self._tag_group.get_tag_group_config(value)
 
     def is_show_more(self) -> bool:
-        return self._tag_group.id in ["address_family", "criticality", "networking", "piggyback"]
+        return self._tag_group.id in ["criticality", "networking", "piggyback"]
 
 
 class ABCHostAttributeHostTagList(ABCHostAttributeTag, abc.ABC):
@@ -1210,7 +1210,7 @@ def _validate_general_host_attributes(host_attributes, new):
                 attr.validate_input(value, "")
 
         # The site attribute gets an extra check
-        if name == "site" and value not in allsites().keys():
+        if name == "site" and value not in get_enabled_sites().keys():
             raise MKUserError(None, _("Unknown site %s") % escaping.escape_attribute(value))
 
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 from typing import Any, Dict, Optional
 
-from cmk.gui.plugins.watolib.utils import ABCConfigDomain, config_variable_registry
+from cmk.gui.plugins.watolib.utils import (
+    ABCConfigDomain,
+    config_variable_registry,
+    UNREGISTERED_SETTINGS,
+)
 from cmk.gui.watolib.config_domains import ConfigDomainGUI
 
 GlobalSettings = Dict[str, Any]
@@ -43,11 +47,7 @@ def save_global_settings(vars_, site_specific=False, custom_site_path=None):
 
     # Some settings are handed over from the central site but are not registered in the
     # configuration domains since the user must not change it directly.
-    for varname in [
-        "wato_enabled",
-        "userdb_automatic_sync",
-        "user_login",
-    ]:
+    for varname in UNREGISTERED_SETTINGS:
         if varname in vars_:
             per_domain.setdefault(ConfigDomainGUI.ident(), {})[varname] = vars_[varname]
 

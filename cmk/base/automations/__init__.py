@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -13,6 +13,7 @@ from typing import Any, Dict, List, NoReturn, Optional
 
 import cmk.utils.debug
 import cmk.utils.log as log
+import cmk.utils.version as cmk_version
 from cmk.utils.exceptions import MKException, MKTimeout
 from cmk.utils.log import console
 from cmk.utils.plugin_loader import load_plugins
@@ -74,7 +75,7 @@ class Automations:
         finally:
             profiling.output_profile()
 
-        out.output(result.serialize())
+        out.output(result.serialize(cmk_version.parse_check_mk_version(cmk_version.__version__)))
         out.output("\n")
 
         return 0

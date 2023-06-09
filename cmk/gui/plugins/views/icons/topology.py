@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -29,7 +29,7 @@ class ShowParentChildTopology(Icon):
     def render(self, what, row, tags, custom_vars):
         url = makeuri_contextless(
             request,
-            [("host_name", row["host_name"])],
+            [("host_regex", f"{row['host_name']}$")],
             filename="parent_child_topology.py",
         )
         return "aggr", _("Host Parent/Child topology"), url

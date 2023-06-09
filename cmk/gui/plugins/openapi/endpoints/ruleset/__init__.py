@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Rulesets"""
@@ -18,7 +18,7 @@ from cmk.gui.plugins.openapi.endpoints.ruleset.fields import (
 )
 from cmk.gui.plugins.openapi.restful_objects import constructors, Endpoint, permissions
 from cmk.gui.plugins.openapi.restful_objects.type_defs import DomainObject
-from cmk.gui.plugins.openapi.utils import serve_json
+from cmk.gui.plugins.openapi.utils import ProblemException, serve_json
 
 PERMISSIONS = permissions.Perm("wato.rulesets")
 
@@ -76,8 +76,17 @@ def show_ruleset(param):
     ruleset_name = param["ruleset_name"]
     user.need_permission("wato.rulesets")
     collection = watolib.SingleRulesetRecursively(ruleset_name)
-    collection.load()
-    ruleset = collection.get(ruleset_name)
+
+    try:
+        collection.load()
+        ruleset = collection.get(ruleset_name)
+    except KeyError:
+        raise ProblemException(
+            title="Unknown ruleset.",
+            detail=f"The ruleset of name {ruleset_name!r} is not known.",
+            status=404,
+        )
+
     return serve_json(_serialize_ruleset(ruleset))
 
 

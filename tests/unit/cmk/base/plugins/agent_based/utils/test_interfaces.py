@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -2338,3 +2338,231 @@ def test_cluster_check_ignore_discovered_params() -> None:
             "outerr: Initialized: 'outerr.node'",
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ["item", "section", "expected_matches"],
+    [
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="Port 1",
+                    alias="",
+                    type="10",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="2",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                )
+            ],
+            id="unclustered, simple item",
+        ),
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                )
+            ],
+            id="unclustered, compound item",
+        ),
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port 2",
+                    type="10",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port 2",
+                    type="10",
+                )
+            ],
+            id="unclustered, simple and compound mixed",
+        ),
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="Port 1",
+                    alias="",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="10",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="2",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="10",
+                    descr="Port 2",
+                    alias="",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            id="clustered, simple item",
+        ),
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            id="clustered, compound item",
+        ),
+        pytest.param(
+            "Port 2",
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port 2",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="",
+                    alias="Port",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="Port",
+                    alias="",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            [
+                interfaces.Interface(
+                    index="1",
+                    descr="",
+                    alias="Port 2",
+                    type="10",
+                    node="node1",
+                ),
+                interfaces.Interface(
+                    index="2",
+                    descr="Port",
+                    alias="",
+                    type="10",
+                    node="node2",
+                ),
+            ],
+            id="clustered, simple and compound mixed",
+        ),
+    ],
+)
+def test_matching_interfaces_for_item(
+    item: str,
+    section: interfaces.Section,
+    expected_matches: Sequence[interfaces.Interface],
+) -> None:
+    assert (
+        list(
+            interfaces.matching_interfaces_for_item(
+                item,
+                section,
+            )
+        )
+        == expected_matches
+    )

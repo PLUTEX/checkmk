@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Module to hold shared code for WATO internals and the WATO plugins"""
@@ -9,7 +9,6 @@
 
 import abc
 import json
-import os
 import re
 import subprocess
 import urllib.parse
@@ -22,7 +21,6 @@ from typing import Type, Union
 from livestatus import SiteConfiguration, SiteConfigurations, SiteId
 
 import cmk.utils.plugin_registry
-from cmk.utils.type_defs import CheckPluginName
 
 import cmk.gui.backup as backup
 import cmk.gui.forms as forms
@@ -85,7 +83,7 @@ from cmk.gui.plugins.watolib.utils import (  # noqa: F401 # pylint: disable=unus
     sample_config_generator_registry,
     SampleConfigGenerator,
 )
-from cmk.gui.sites import get_activation_site_choices, get_site_config
+from cmk.gui.sites import get_activation_site_choices, get_configured_site_choices, get_site_config
 from cmk.gui.type_defs import Choices
 from cmk.gui.utils.escaping import escape_to_html
 from cmk.gui.utils.flashed_messages import flash  # noqa: F401 # pylint: disable=unused-import
@@ -156,9 +154,7 @@ from cmk.gui.watolib import (  # noqa: F401 # pylint: disable=unused-import
     wato_fileheader,
     wato_root_dir,
 )
-from cmk.gui.watolib.check_mk_automations import (
-    get_check_information as get_check_information_automation,
-)
+from cmk.gui.watolib.check_mk_automations import get_check_information_cached
 from cmk.gui.watolib.check_mk_automations import (
     get_section_information as get_section_information_automation,
 )
@@ -180,7 +176,7 @@ from cmk.gui.watolib.host_attributes import (  # noqa: F401 # pylint: disable=un
     HostAttributeTopicMetaData,
     HostAttributeTopicNetworkScan,
 )
-from cmk.gui.watolib.password_store import PasswordStore
+from cmk.gui.watolib.password_store import PasswordStore, passwordstore_choices
 from cmk.gui.watolib.rulespecs import (  # noqa: F401 # pylint: disable=unused-import
     BinaryHostRulespec,
     BinaryServiceRulespec,
@@ -292,6 +288,12 @@ def _list_user_icons_and_actions():
     return sorted(choices, key=lambda x: x[1])
 
 
+def _convert_webapi_snmp_credentials_input(value: Union[list, tuple, str]) -> Union[tuple, str]:
+    if isinstance(value, list):
+        return tuple(value)
+    return value
+
+
 def SNMPCredentials(  # pylint: disable=redefined-builtin
     title: _Optional[str] = None,
     help: _Optional[ValueSpecHelp] = None,
@@ -299,7 +301,7 @@ def SNMPCredentials(  # pylint: disable=redefined-builtin
     default_value: _Optional[str] = "public",
     allow_none: bool = False,
     for_ec: bool = False,
-) -> Alternative:
+) -> ValueSpec:
     def alternative_match(x):
         if only_v3:
             # NOTE: Indices are shifted by 1 due to a only_v3 hack below!!
@@ -345,19 +347,15 @@ def SNMPCredentials(  # pylint: disable=redefined-builtin
     else:
         title = title if title is not None else _("SNMP credentials")
 
-    def validate(value: Any, _prefix: str):
-        if isinstance(value, (str, tuple)):
-            return
-        raise MKUserError(None, "Invalid Format for SNMP credentials")
-
-    return Alternative(
+    alternative = Alternative(
         title=title,
         help=help,
         default_value=default_value,
         match=match,
         elements=elements,
-        validate=validate,
     )
+
+    return Transform(alternative, forth=_convert_webapi_snmp_credentials_input)
 
 
 def _snmp_no_credentials_element() -> ValueSpec:
@@ -700,14 +698,6 @@ def _group_choices(group_information: GroupSpecs) -> Choices:
         [(k, t["alias"] and t["alias"] or k) for (k, t) in group_information.items()],
         key=lambda x: x[1].lower(),
     )
-
-
-def passwordstore_choices() -> Choices:
-    pw_store = PasswordStore()
-    return [
-        (ident, pw["title"])
-        for ident, pw in pw_store.filter_usable_entries(pw_store.load_for_reading()).items()
-    ]
 
 
 def PasswordFromStore(  # pylint: disable=redefined-builtin
@@ -1358,7 +1348,7 @@ class _CheckTypeHostSelection(DualListChoice):
         super().__init__(rows=25, **kwargs)
 
     def get_elements(self):
-        checks = get_check_information()
+        checks = get_check_information_cached()
         return [
             (str(cn), (str(cn) + " - " + c["title"])[:60])
             for (cn, c) in checks.items()
@@ -1372,7 +1362,7 @@ class _CheckTypeMgmtSelection(DualListChoice):
         super().__init__(rows=25, **kwargs)
 
     def get_elements(self):
-        checks = get_check_information()
+        checks = get_check_information_cached()
         return [
             (str(cn.create_basic_name()), (str(cn) + " - " + c["title"])[:60])
             for (cn, c) in checks.items()
@@ -2386,7 +2376,11 @@ class HostTagCondition(ValueSpec):
                 tagvalue = tag_group.default_value
             else:
                 tagvalue = request.var(varprefix + "tagvalue_" + tag_group.id)
-            assert tagvalue is not None
+
+            # Not all tags are submitted, see cmk.gui.forms.remove_unused_vars.
+            # So simply skip None values.
+            if tagvalue is None:
+                continue
 
             mode = request.var(varprefix + "tag_" + tag_group.id)
             if mode == "is":
@@ -2617,25 +2611,27 @@ def transform_simple_to_multi_host_rule_match_conditions(value):
 
 def _simple_host_rule_match_conditions():
     return [
-        _site_rule_match_condition(),
+        _site_rule_match_condition(only_sites_with_replication=False),
         _single_folder_rule_match_condition(),
     ] + _common_host_rule_match_conditions()
 
 
 def multifolder_host_rule_match_conditions():
     return [
-        _site_rule_match_condition(),
+        _site_rule_match_condition(only_sites_with_replication=True),
         _multi_folder_rule_match_condition(),
     ] + _common_host_rule_match_conditions()
 
 
-def _site_rule_match_condition():
+def _site_rule_match_condition(only_sites_with_replication: bool):
     return (
         "match_site",
         DualListChoice(
             title=_("Match sites"),
             help=_("This condition makes the rule match only hosts of " "the selected sites."),
-            choices=get_activation_site_choices,
+            choices=get_activation_site_choices
+            if only_sites_with_replication
+            else get_configured_site_choices,
         ),
     )
 
@@ -2783,12 +2779,6 @@ class FolderChoice(DropdownChoice):
         kwargs["choices"] = watolib.Folder.folder_choices
         kwargs.setdefault("title", _("Folder"))
         DropdownChoice.__init__(self, **kwargs)
-
-
-@request_memoize()
-def get_check_information() -> Mapping[CheckPluginName, Mapping[str, str]]:
-    raw_check_dict = get_check_information_automation().plugin_infos
-    return {CheckPluginName(name): info for name, info in sorted(raw_check_dict.items())}
 
 
 @request_memoize()

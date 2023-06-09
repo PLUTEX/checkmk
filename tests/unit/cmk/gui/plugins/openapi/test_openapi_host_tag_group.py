@@ -1,6 +1,6 @@
 # !/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -242,8 +242,8 @@ def test_openapi_host_tag_group_update_use_case(aut_user_auth_wsgi_app: WebTestA
 
 def test_openapi_host_tag_with_only_one_option(
     aut_user_auth_wsgi_app: WebTestAppForCMK,
-    with_host,
-):
+    with_host: None,
+) -> None:
     base = "/NO_SITE/check_mk/api/1.0"
     wsgi_app = aut_user_auth_wsgi_app
     wsgi_app.call_method(
@@ -332,3 +332,55 @@ def test_openapi_host_tag_with_only_one_option(
     )
 
     assert host.json["extensions"]["attributes"]["tag_group_id999"] is None
+
+
+def test_openapi_host_tag_groups_all_props_in_schema(
+    aut_user_auth_wsgi_app: WebTestAppForCMK, base: str
+) -> None:
+    resp = aut_user_auth_wsgi_app.call_method(
+        "get",
+        base + "/domain-types/host_tag_group/collections/all",
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+    first_tag = resp.json["value"][0]
+    assert "title" in first_tag
+    assert "id" in first_tag
+    assert "topic" in first_tag["extensions"]
+    assert "tags" in first_tag["extensions"]
+
+
+def test_openapi_host_tags_groups_without_topic_and_tags(
+    aut_user_auth_wsgi_app: WebTestAppForCMK, base: str
+) -> None:
+    aut_user_auth_wsgi_app.call_method(
+        "post",
+        base + "/domain-types/host_tag_group/collections/all",
+        params=json.dumps(
+            {
+                "ident": "group_id999",
+                "title": "Kubernetes",
+                "help": "Kubernetes Pods",
+                "tags": [{"ident": "pod", "title": "Pod"}],
+            }
+        ),
+        headers={"Accept": "application/json"},
+        status=200,
+        content_type="application/json",
+    )
+
+    individual_resp = aut_user_auth_wsgi_app.call_method(
+        "get",
+        base + "/objects/host_tag_group/group_id999",
+        headers={"Accept": "application/json"},
+        status=200,
+    )
+
+    assert individual_resp.json["extensions"]["topic"] == "Tags"
+
+    # Let's see if outward validation works here as well
+    aut_user_auth_wsgi_app.get(
+        base + "/domain-types/host_tag_group/collections/all",
+        headers={"Accept": "application/json"},
+        status=200,
+    )

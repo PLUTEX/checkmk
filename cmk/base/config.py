@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -710,7 +710,9 @@ class PackedConfigGenerator:
 
         # These functions purpose is to filter out hosts which are monitored on different sites
         active_hosts = self._config_cache.all_active_hosts()
-        active_clusters = self._config_cache.all_active_clusters()
+        # Include inactive cluster hosts.
+        # Otherwise services clustered to those hosts will wrongly be checked by the nodes.
+        sites_clusters = self._config_cache.all_sites_clusters()
 
         def filter_all_hosts(all_hosts_orig: AllHosts) -> List[HostName]:
             all_hosts_red = []
@@ -724,7 +726,7 @@ class PackedConfigGenerator:
             clusters_red = {}
             for cluster_entry, cluster_nodes in clusters_orig.items():
                 clustername = cluster_entry.split("|", 1)[0]
-                if clustername in active_clusters:
+                if clustername in sites_clusters:
                     clusters_red[cluster_entry] = cluster_nodes
             return clusters_red
 
@@ -3435,6 +3437,9 @@ class ConfigCache:
 
     def _initialize_caches(self) -> None:
         self.check_table_cache = _config_cache.get("check_tables")
+        self._host_of_clustered_service_cache: Dict[
+            tuple[HostName, ServiceName, Optional[tuple]], HostName
+        ] = {}
 
         self._cache_section_name_of: Dict[CheckPluginNameStr, str] = {}
 
@@ -4002,7 +4007,32 @@ class ConfigCache:
     def _get_all_configured_clusters(self) -> Set[HostName]:
         return set(strip_tags(list(clusters)))
 
+    def all_sites_clusters(self) -> Set[HostName]:
+        return {
+            c
+            for c in self._all_configured_clusters
+            if distributed_wato_site is None
+            or _host_is_member_of_site(self, c, distributed_wato_site)
+        }
+
     def host_of_clustered_service(
+        self,
+        hostname: HostName,
+        servicedesc: str,
+        part_of_clusters: Optional[List[HostName]] = None,
+    ) -> HostName:
+        key = (hostname, servicedesc, tuple(part_of_clusters) if part_of_clusters else None)
+        if (actual_hostname := self._host_of_clustered_service_cache.get(key)) is not None:
+            return actual_hostname
+
+        self._host_of_clustered_service_cache[key] = self._host_of_clustered_service(
+            hostname,
+            servicedesc,
+            part_of_clusters,
+        )
+        return self._host_of_clustered_service_cache[key]
+
+    def _host_of_clustered_service(
         self,
         hostname: HostName,
         servicedesc: str,
@@ -4198,25 +4228,30 @@ class CEEConfigCache(ConfigCache):
             deflt=cmc_check_timeout,  # type: ignore[name-defined] # pylint: disable=undefined-variable
         )
 
-    def graphite_metrics_of_service(
+    def graphite_metrics_of(
         self,
         hostname: HostName,
         description: Optional[ServiceName],
         *,
-        default: Sequence[str],
+        default: List[str],
     ) -> Sequence[str]:
         if description is None:
-            return default
+            return next(
+                iter(
+                    self.host_extra_conf(
+                        hostname,
+                        cmc_graphite_host_metrics,  # type: ignore[name-defined] # pylint: disable=undefined-variable
+                    )
+                ),
+                default,
+            )
 
-        value = self.get_service_ruleset_value(
+        return self.get_service_ruleset_value(
             hostname,
             description,
             cmc_graphite_service_metrics,  # type: ignore[name-defined] # pylint: disable=undefined-variable
-            deflt=None,
+            deflt=default,
         )
-        if value is None:
-            return default
-        return value
 
     def influxdb_metrics_of_service(
         self,

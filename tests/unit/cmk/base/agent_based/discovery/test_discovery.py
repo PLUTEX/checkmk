@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -365,6 +365,7 @@ def test__get_post_discovery_services(
             service_filters,
             result,
             mode,
+            keep_clustered_vanished_services=True,
         ).values()
     ]
 
@@ -1490,7 +1491,7 @@ def test__perform_host_label_discovery_on_realhost(
 ) -> None:
     scenario = realhost_scenario
 
-    host_label_result = discovery.analyse_node_labels(
+    host_label_result, _labels_by_node = discovery.analyse_node_labels(
         host_key=scenario.host_key,
         host_key_mgmt=scenario.host_key_mgmt,
         parsed_sections_broker=scenario.parsed_sections_broker,
@@ -1521,16 +1522,11 @@ def test__discover_services_on_cluster(
         assert not discovery_test_case.expected_services
         return
 
-    scenario = cluster_scenario
+    if discovery_test_case.save_labels:
+        # the cluster disocvery is never triggered with save_labels set to true.
+        return
 
-    # we need the sideeffects of this call. TODO: guess what.
-    _ = discovery._host_labels.analyse_cluster_labels(
-        host_config=scenario.host_config,
-        parsed_sections_broker=scenario.parsed_sections_broker,
-        load_labels=discovery_test_case.load_labels,
-        save_labels=discovery_test_case.save_labels,
-        on_error=OnError.RAISE,
-    )
+    scenario = cluster_scenario
 
     discovered_services = discovery._get_cluster_services(
         scenario.host_config,
@@ -1549,13 +1545,16 @@ def test__discover_services_on_cluster(
 def test__perform_host_label_discovery_on_cluster(
     cluster_scenario: ClusterScenario, discovery_test_case: DiscoveryTestCase
 ) -> None:
+    if discovery_test_case.save_labels:
+        # the cluster disocvery is never triggered with save_labels set to true.
+        return
+
     scenario = cluster_scenario
 
-    host_label_result = discovery._host_labels.analyse_cluster_labels(
+    host_label_result, _labels_by_host = discovery._host_labels.analyse_cluster_labels(
         host_config=scenario.host_config,
         parsed_sections_broker=scenario.parsed_sections_broker,
         load_labels=discovery_test_case.load_labels,
-        save_labels=discovery_test_case.save_labels,
         on_error=OnError.RAISE,
     )
 

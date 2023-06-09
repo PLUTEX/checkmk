@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -160,7 +160,6 @@ def test_all_check_variables_present(fix_plugin_legacy):
         "METRIC_PULSE_SECURE_LOG",
         "NAME_TRANSLATION",
         "NOTHING_PENDING_FOR_INSTALLATION",
-        "NO_BLOCKING_SESSIONS_MSG",
         "NimbleReadsType",
         "NimbleWritesType",
         "OPNEED_STATUS_MAP",
@@ -671,9 +670,7 @@ def test_all_check_variables_present(fix_plugin_legacy):
         "msexch_rpcclientaccess_defaultlevels",
         "msoffice_licenses_levels",
         "mssql_backup_default_levels",
-        "mssql_blocked_sessions_default_levels",
         "mssql_connections_default_levels",
-        "mssql_tablespace_default_levels",
         "names",
         "netapp_api_cpu_cm_default_levels",
         "netapp_api_cpu_default_levels",
@@ -701,7 +698,6 @@ def test_all_check_variables_present(fix_plugin_legacy):
         "netscaler_health_info",
         "netscaler_health_temp_default_levels",
         "netscaler_mem_default_levels",
-        "netscaler_tcp_conns_default_levels",
         "nimble_latency_default_levels",
         "nodes_info",
         "nullmailer_mailq_default_levels",
@@ -2071,11 +2067,9 @@ def test_no_new_or_vanished_legacy_checks(fix_plugin_legacy):
         "msoffice_serviceplans",
         "mssql_backup",
         "mssql_backup.per_type",
-        "mssql_blocked_sessions",
         "mssql_connections",
         "mssql_instance",
         "mssql_jobs",
-        "mssql_tablespaces",
         "mssql_versions",
         "multipath",
         "mysql",
@@ -2143,7 +2137,6 @@ def test_no_new_or_vanished_legacy_checks(fix_plugin_legacy):
         "netscaler_health.temp",
         "netscaler_health.psu",
         "netscaler_mem",
-        "netscaler_tcp_conns",
         "netstat",
         "nfsexports",
         "nfsiostat",
@@ -2444,7 +2437,6 @@ def test_no_new_or_vanished_legacy_checks(fix_plugin_legacy):
         "symantec_av_progstate",
         "symantec_av_quarantine",
         "symantec_av_updates",
-        "synology_disks",
         "synology_fans",
         "synology_info",
         "synology_raid",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 from __future__ import annotations
@@ -812,10 +812,10 @@ class InputRuleObject(base.BaseSchema):
 
     ruleset = fields.String(
         description="Name of rule set.",
-        example="host_config",
+        example="host_label_rules",
         required=True,
     )
-    folder = gui_fields.FolderField(required=True, example="~router")
+    folder = gui_fields.FolderField(required=True, example="~hosts~linux")
     properties = fields.Nested(
         RuleProperties,
         description="Configuration values for rules.",
@@ -827,7 +827,7 @@ class InputRuleObject(base.BaseSchema):
             "the 'export for API' menu item in the Rule Editor of the GUI. The value is expected "
             "to be a valid Python type."
         ),
-        example='{"ignore_fs_types": ["tmpfs"]}',
+        example="\"{'cmk/os_family': 'linux'}\"",
     )
     conditions = fields.Nested(
         RuleConditions,

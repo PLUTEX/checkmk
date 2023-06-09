@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1184,20 +1184,43 @@ class GUIViewRenderer(ABCViewRenderer):
                 ("load_name", self.view.name),
             ]
 
-            clone_mode: bool = False
-            if self.view.spec["owner"] != user.id:
-                url_vars.append(("owner", self.view.spec["owner"]))
-                if not user.may("general.edit_foreign_views"):
-                    clone_mode = True
+            is_builtin_view: bool = not (view_owner := self.view.spec["owner"])
+            is_foreign_view: bool = view_owner != user.id
+            is_own_view: bool = not is_builtin_view and not is_foreign_view
 
-            url_vars.append(("mode", "clone" if clone_mode else "edit"))
-            url = makeuri_contextless(request, url_vars, filename="edit_view.py")
+            if not is_builtin_view and (
+                is_own_view or (is_foreign_view and user.may("general.edit_foreign_views"))
+            ):
+                if is_own_view:
+                    title = _("Edit my view")
+                else:
+                    title = _("Edit view of user %s") % view_owner
+                    url_vars += [("owner", view_owner)]
 
-            yield PageMenuEntry(
-                title=_("Clone view") if clone_mode else _("Customize view"),
-                icon_name="clone" if clone_mode else "edit",
-                item=make_simple_link(url),
-            )
+                yield PageMenuEntry(
+                    title=title,
+                    icon_name="edit",
+                    item=make_simple_link(
+                        makeuri_contextless(
+                            request,
+                            url_vars + [("mode", "edit")],
+                            filename="edit_view.py",
+                        )
+                    ),
+                )
+
+            if is_builtin_view or not is_own_view:
+                yield PageMenuEntry(
+                    title=_("Clone builtin view") if is_builtin_view else _("Clone view"),
+                    icon_name="clone",
+                    item=make_simple_link(
+                        makeuri_contextless(
+                            request,
+                            url_vars + [("owner", view_owner), ("mode", "clone")],
+                            filename="edit_view.py",
+                        )
+                    ),
+                )
 
     def _page_menu_dropdown_add_to(self) -> List[PageMenuDropdown]:
         return visuals.page_menu_dropdown_add_to_visual(add_type="view", name=self.view.name)
@@ -3180,19 +3203,26 @@ def _get_combined_graphs_entry(
     if not _show_in_current_dropdown(view, info.ident, is_single_info):
         return None
 
-    httpvars: HTTPVariables = [
-        ("single_infos", ",".join(view.spec["single_infos"])),
-        ("datasource", view.datasource.ident),
-        ("view_title", view_title(view.spec, view.context)),
-    ]
-
-    url = makeuri(
-        request, httpvars, filename="combined_graphs.py", delvars=["show_checkboxes", "selection"]
-    )
     return PageMenuEntry(
         title=_("All metrics of same type in one graph"),
         icon_name="graph",
-        item=make_simple_link(url),
+        item=make_simple_link(
+            makeuri_contextless(
+                request,
+                [
+                    ("single_infos", ",".join(view.spec["single_infos"])),
+                    ("datasource", view.datasource.ident),
+                    ("view_title", view_title(view.spec, view.context)),
+                    *visuals.context_to_uri_vars(
+                        visuals.active_context_from_request(
+                            view.datasource.infos,
+                            view.context,
+                        )
+                    ),
+                ],
+                filename="combined_graphs.py",
+            )
+        ),
     )
 
 

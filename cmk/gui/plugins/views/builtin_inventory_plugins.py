@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -425,6 +425,7 @@ inventory_displayhints.update({
     ".hardware.storage.disks:*.": {"title": _l("Block Device %d")},
     ".hardware.storage.disks:*.fsnode": {"title": _l("Filesystem Node")},
     ".hardware.storage.disks:*.controller": {"title": _l("Controller")},
+    ".hardware.storage.disks:*.drive_index": {"title": _l("Drive")},
     ".hardware.storage.disks:*.signature": {"title": _l("Disk ID")},
     ".hardware.storage.disks:*.vendor": {"title": _l("Vendor")},
     ".hardware.storage.disks:*.local": {"title": _l("Local")},
@@ -546,6 +547,25 @@ inventory_displayhints.update({
     ".software.applications.check_mk.host_labels:*.plugin_name": {
         "title": _l("Discovered by plugin"),
     },
+    ".software.applications.checkmk-agent.": {
+        "title": _l("Checkmk Agent"),
+        "keyorder": [
+            "version",
+            "agentdirectory",
+            "datadirectory",
+            "spooldirectory",
+            "pluginsdirectory",
+            "localdirectory",
+            "agentcontroller",
+        ],
+    },
+    ".software.applications.checkmk-agent.version": {"title": _l("Version")},
+    ".software.applications.checkmk-agent.agentdirectory": {"title": _l("Agent directory")},
+    ".software.applications.checkmk-agent.datadirectory": {"title": _l("Data directory")},
+    ".software.applications.checkmk-agent.spooldirectory": {"title": _l("Spool directory")},
+    ".software.applications.checkmk-agent.pluginsdirectory": {"title": _l("Plugins directory")},
+    ".software.applications.checkmk-agent.localdirectory": {"title": _l("Local directory")},
+    ".software.applications.checkmk-agent.agentcontroller": {"title": _l("Agent Controller")},
     ".software.applications.checkmk-agent.plugins:": {
         "title": _l("Agent plugins"),
         "keyorder": ["name", "version", "cache_interval"],

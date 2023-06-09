@@ -1,4 +1,4 @@
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -25,7 +25,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 rustls = { version = "0.20" }
 rustls-pemfile = { version = "1.0" }
 log = { version = "0.4" }
-flexi_logger = { version = "0.22" }
+flexi_logger = { version = "0.24", default-features = false }
 http = { version = "0.2" }
 anyhow = { version = "1.0", features = ["backtrace"]}
 nix = { version = "0.24" }

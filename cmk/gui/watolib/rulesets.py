@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -799,7 +799,14 @@ class Ruleset:
         return self.rulespec.valuespec
 
     def help(self) -> Union[None, str, HTML]:
-        return self.rulespec.help
+        try:
+            return self.rulespec.help
+        except NameError:
+            # This prevents the Ruleset page (e.g. 'Service monitoring rules')
+            # from crashing if the module cannot be loaded due to missing
+            # imports. This can be the case with external packages such as MKPs
+            # from the exchange.
+            return None
 
     def title(self) -> Optional[str]:
         return self.rulespec.title
@@ -1178,7 +1185,7 @@ class Rule:
         yield _("The rule does not match")
 
     def matches_search(self, search_options: SearchOptions) -> bool:
-        if "rule_folder" in search_options and self.folder.name() not in self._get_search_folders(
+        if "rule_folder" in search_options and self.folder.path() not in self._get_search_folders(
             search_options
         ):
             return False
@@ -1258,11 +1265,9 @@ class Rule:
     def _get_search_folders(self, search_options: SearchOptions) -> List[str]:
         current_folder, do_recursion = search_options["rule_folder"]
         current_folder = Folder.folder(current_folder)
-        search_in_folders = [current_folder.name()]
+        search_in_folders = [current_folder.path()]
         if do_recursion:
-            search_in_folders = [
-                x.split("/")[-1] for x, _y in current_folder.recursive_subfolder_choices()
-            ]
+            search_in_folders = [x for x, _y in current_folder.recursive_subfolder_choices()]
         return search_in_folders
 
     def index(self) -> int:

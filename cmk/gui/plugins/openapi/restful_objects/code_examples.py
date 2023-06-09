@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Generate code-examples for the documentation.
@@ -167,6 +167,7 @@ out=$(
     --data '{{ request_schema |
             to_dict |
             to_json(indent=2, sort_keys=True) |
+            _escape_single_quotes |
             indent(skip_lines=1, spaces=8) }}' \\
 {%- endif %}
     "$API_URL{{ request_endpoint | fill_out_parameters }}")
@@ -575,12 +576,17 @@ def _jinja_environment() -> jinja2.Environment:
         to_json=json.dumps,
         to_python=yapf_format,
         repr=repr,
+        _escape_single_quotes=_escape_single_quotes,
     )
     # These objects will be available in the templates
     tmpl_env.globals.update(
         spec=SPEC,
     )
     return tmpl_env
+
+
+def _escape_single_quotes(text: str) -> str:
+    return text.replace("'", "'\\''")
 
 
 def to_param_dict(params: List[OpenAPIParameter]) -> Dict[str, OpenAPIParameter]:

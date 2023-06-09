@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Tool for updating Checkmk configuration files after version updates
@@ -52,20 +52,30 @@ import cmk.utils.paths
 import cmk.utils.site
 import cmk.utils.tty as tty
 from cmk.utils import password_store, version
+from cmk.utils.agent_registration import get_uuid_link_manager
 from cmk.utils.bi.bi_legacy_config_converter import BILegacyPacksConverter
 from cmk.utils.check_utils import maincheckify
 from cmk.utils.crypto.password_hashing import is_insecure_hash
 from cmk.utils.encryption import raw_certificates_from_file
 from cmk.utils.exceptions import MKGeneralException
+from cmk.utils.license_usage.samples import hash_site_id, LicenseUsageHistoryDump
 from cmk.utils.log import VERBOSE
 from cmk.utils.regex import unescape
-from cmk.utils.store import load_from_mk_file, ObjectStore, save_mk_file
+from cmk.utils.store import (
+    load_bytes_from_file,
+    load_from_mk_file,
+    ObjectStore,
+    save_bytes_to_file,
+    save_mk_file,
+)
 from cmk.utils.type_defs import (
     BakeryTargetFolder,
     CheckPluginName,
     ContactgroupName,
     HostName,
     HostOrServiceConditionRegex,
+    RuleValue,
+    user_id_22_regex,
     UserId,
 )
 
@@ -90,6 +100,15 @@ import cmk.gui.watolib.rulesets
 import cmk.gui.watolib.tags
 from cmk.gui import main_modules
 from cmk.gui.bi import BIManager  # pylint: disable=cmk-module-layer-violation
+
+if version.is_managed_edition():
+    from cmk.gui.cme.managed import (  # pylint: disable=no-name-in-module,import-error
+        Customer,
+        CustomerId,
+        load_customers,
+        save_customers,
+    )
+
 from cmk.gui.exceptions import MKUserError
 from cmk.gui.log import logger as gui_logger
 from cmk.gui.plugins.dashboard.utils import (
@@ -106,7 +125,7 @@ from cmk.gui.plugins.userdb.utils import (
 )
 from cmk.gui.plugins.views.utils import get_all_views
 from cmk.gui.plugins.wato.utils import config_variable_registry
-from cmk.gui.plugins.watolib.utils import filter_unknown_settings
+from cmk.gui.plugins.watolib.utils import filter_unknown_settings, UNREGISTERED_SETTINGS
 from cmk.gui.sites import is_wato_slave_site
 from cmk.gui.userdb import load_users, save_users, Users
 from cmk.gui.utils.logged_in import SuperUserContext
@@ -353,14 +372,19 @@ class UpdateConfig:
             (self._transform_influxdb_connnections, "Rewriting InfluxDB connections"),
             (self._check_ec_rules, "Disabling unsafe EC rules"),
             (self._update_bakery, "Update bakery links and settings"),
+            (self._remove_old_custom_logos, "Remove old custom logos (CME)"),
+            (self._fix_agent_receiver_symlinks, "Fix registered hosts symlinks"),
+            (self._update_license_usage_history, "Update license usage history"),
         ]
 
     def _initialize_base_environment(self) -> None:
         # Failing to load the config here will result in the loss of *all*
         # services due to an exception thrown by cmk.base.config.service_description
         # in _parse_autocheck_entry of cmk.base.autochecks.
-        cmk.base.config.load()
         cmk.base.config.load_all_agent_based_plugins(cmk.base.check_api.get_check_api_context)
+        # Watch out: always load the plugins before loading the config.
+        # The validation step will not be executed otherwise.
+        cmk.base.config.load()
 
     # FS_USED UPDATE DELETE THIS FOR CMK 1.8, THIS ONLY migrates 1.6->2.0
     def _update_fs_used_name(self) -> None:
@@ -390,7 +414,7 @@ class UpdateConfig:
         global_config = cmk.gui.watolib.global_settings.load_configuration_settings(
             full_config=True
         )
-        self._update_global_config(global_config)
+        global_config = self._update_global_config(global_config)
         cmk.gui.watolib.global_settings.save_global_settings(global_config)
 
     def _update_site_specific_global_settings(self) -> None:
@@ -399,8 +423,7 @@ class UpdateConfig:
             return
 
         global_config = cmk.gui.watolib.global_settings.load_site_global_settings()
-        self._update_global_config(global_config)
-
+        global_config = self._update_global_config(global_config)
         cmk.gui.watolib.global_settings.save_site_global_settings(global_config)
 
     def _update_remote_site_specific_global_settings(self) -> None:
@@ -409,7 +432,9 @@ class UpdateConfig:
         configured_sites = site_mgmt.load_sites()
         for site_id, site_spec in configured_sites.items():
             if site_globals_editable(site_id, site_spec):
-                self._update_global_config(site_spec.setdefault("globals", {}))
+                site_globals = site_spec.get("globals", {})
+                if site_globals:
+                    site_spec["globals"] = self._update_global_config(site_globals)
         site_mgmt.save_sites(configured_sites, activate=False)
 
     def _update_global_config(
@@ -462,7 +487,11 @@ class UpdateConfig:
         config_var: str,
         config_val: Any,
     ) -> Any:
-        return config_variable_registry[config_var]().valuespec().transform_value(config_val)
+        try:
+            config_variable_cls = config_variable_registry[config_var]
+        except KeyError:
+            return config_val
+        return config_variable_cls().valuespec().transform_value(config_val)
 
     def _transform_global_config_values(
         self,
@@ -472,6 +501,7 @@ class UpdateConfig:
             {
                 config_var: self._transform_global_config_value(config_var, config_val)
                 for config_var, config_val in global_config.items()
+                if config_var not in UNREGISTERED_SETTINGS
             }
         )
         return global_config
@@ -688,8 +718,10 @@ class UpdateConfig:
         self._extract_disabled_snmp_sections_from_ignored_checks(all_rulesets)
         self._extract_checkmk_agent_rule_from_check_mk_config(all_rulesets)
         self._extract_checkmk_agent_rule_from_exit_spec(all_rulesets)
+        self._transform_wato_ruleset_enforced_service_cpu_load(all_rulesets)
         self._transform_replaced_wato_rulesets(all_rulesets)
         self._transform_wato_rulesets_params(all_rulesets)
+        self._transform_wato_ruleset_fileinfo_groups(all_rulesets)
         self._transform_discovery_disabled_services(all_rulesets)
         self._validate_regexes_in_item_specs(all_rulesets)
         self._remove_removed_check_plugins_from_ignored_checks(
@@ -889,6 +921,98 @@ class UpdateConfig:
 
         if num_errors and self._arguments.debug:
             raise MKGeneralException("Failed to transform %d rule values" % num_errors)
+
+    def _transform_wato_ruleset_fileinfo_groups(
+        self,
+        all_rulesets: RulesetCollection,
+    ) -> None:
+        fileinfo_group_patterns_rules_values = self._get_rules_values_for_ruleset(
+            all_rulesets, "fileinfo_groups"
+        )
+        fileinfo_group_rules_values = self._get_rules_values_for_ruleset(
+            all_rulesets, "static_checks:fileinfo-groups"
+        )
+
+        if not fileinfo_group_patterns_rules_values or not fileinfo_group_rules_values:
+            return
+
+        pattern_groups: List[Tuple[str, Tuple[str, str]]] = [
+            group
+            for rule in fileinfo_group_patterns_rules_values
+            for group in rule["group_patterns"]
+        ]
+        patterns_by_name: Dict[str, Set[Tuple[str, str]]] = {}
+        for group in pattern_groups:
+            patterns_by_name.setdefault(group[0], set()).add(group[1])
+
+        for rule_value in fileinfo_group_rules_values:
+            try:
+                self._do_transform_fileinfo_groups_rule(patterns_by_name, rule_value)
+            except Exception as e:
+                if self._arguments.debug:
+                    raise
+                self._logger.error(
+                    "ERROR: Failed to transform fileinfo_groups enforced service - the 'Size, age"
+                    " and count of file groups' enforced service will not work (see werk #14938):"
+                    " (Rule value: %s\nPatterns: %s\nError: %s",
+                    rule_value,
+                    patterns_by_name,
+                    e,
+                )
+
+    def _get_rules_values_for_ruleset(
+        self, all_rulesets: RulesetCollection, ruleset_id: str
+    ) -> List[RuleValue]:
+        rulesets_map = all_rulesets.get_rulesets()
+        ruleset = rulesets_map.get(ruleset_id)
+        if ruleset is None:
+            return []
+        return [rule.value for _folder, _folder_index, rule in ruleset.get_rules()]
+
+    def _do_transform_fileinfo_groups_rule(
+        self,
+        patterns_by_name: Dict[str, Set[Tuple[str, str]]],
+        rule_value: Tuple[str, str, dict],
+    ) -> None:
+        fileinfo_group_name = rule_value[1]
+        check_rule_settings = rule_value[2]
+
+        # If "group_patterns" already has some items in it, then we will skip it
+        if check_rule_settings.get("group_patterns"):
+            return
+
+        # If fileinfo_group_name is not in patterns_by_name then we have nothing to do.
+        # We shouldn't log any error because this is a legit situation
+        if (regex_set := patterns_by_name.get(fileinfo_group_name)) is None:
+            return
+
+        if len(regex_set) > 1:
+            raise ValueError(
+                f"Different regex values for same fileinfo group {fileinfo_group_name}: {regex_set}"
+            )
+
+        regex_values = list(regex_set)[0]
+
+        self._logger.debug(
+            f"Transform fileinfo_groups: adding patterns to group '{fileinfo_group_name}'"
+        )
+        check_rule_settings["group_patterns"] = [regex_values]
+
+    def _transform_wato_ruleset_enforced_service_cpu_load(
+        self, all_rulesets: RulesetCollection
+    ) -> None:
+        rulesets_map = all_rulesets.get_rulesets()
+        ruleset = rulesets_map.get("static_checks:cpu_load")
+
+        if ruleset is None:
+            return
+
+        for _, _, rule in ruleset.get_rules():
+            if not isinstance(rule.value, tuple):
+                continue
+            plugin_name = CheckPluginName(rule.value[0])
+            if plugin_name in REMOVED_CHECK_PLUGIN_MAP:
+                rule.value = (str(REMOVED_CHECK_PLUGIN_MAP.get(plugin_name)),) + rule.value[1:]
 
     def _transform_discovery_disabled_services(
         self,
@@ -1376,6 +1500,8 @@ class UpdateConfig:
                 (users[user_id].get("connector") == "htpasswd")
                 and (pw := users[user_id].get("password"))
                 and is_insecure_hash(pw)
+                # Automation users' password hashes are irrelevant, as they are not used for login.
+                and "automation_secret" not in users[user_id]
             )
         ]
 
@@ -1389,6 +1515,30 @@ The following users are affected:"""
             self._logger.warning(_format_warning(explanation + "\n" + "\n".join(insecure)))
 
         save_users(users)
+
+    def _check_user_ids(self) -> None:
+        """Starting in version 2.2 we will validate UserIds more strictly. Wato is already quite
+        strict in 2.1, so especially existing UserIds from "external" connectors like LDAP might
+        no longer be accepted in the future. This check will warn about affected users.
+        """
+        users: Users = load_users(lock=False)
+
+        incompatible = [
+            f"{u} (from Connection: \"{users[u].get('connector')}\")"
+            for u in users
+            if user_id_22_regex().match(UserId(u)) is None
+        ]
+        if not incompatible:
+            return
+
+        msg = """WARNING: Some users will not be compatible with future versions of Checkmk.
+Beginning with Checkmk version 2.2, certain special characters will no longer be permitted in
+Checkmk user IDs. If you require the use of such characters in your user IDs, please contact Checkmk
+support for assistance. Please refert to Werk #14393 for further details.
+The following users in your current installation will become incompatible with Checkmk 2.2:\n""" + "\n".join(
+            incompatible
+        )
+        self._logger.warning(_format_warning(msg))
 
     def _rewrite_py2_inventory_data(self) -> None:
         done_path = Path(cmk.utils.paths.var_dir, "update_config")
@@ -1862,6 +2012,48 @@ The following users are affected:"""
         root_folder.save_hosts()
         state[state_key] = "True"
         update_state.save()
+
+    def _remove_old_custom_logos(self) -> None:
+        """Remove old custom logo occurences, i.e. local image files "mk-logo.png" and customer
+        config "globals" entries with key "logo"."""
+        if not version.is_managed_edition():
+            return
+
+        themes_path: Path = Path(cmk.utils.paths.local_web_dir, "htdocs/themes/")
+        for theme in ["facelift", "modern-dark"]:
+            logo_path: Path = themes_path / theme / "images/mk-logo.png"
+            if logo_path.is_file():
+                logo_path.unlink()
+
+        try:
+            customers: Dict[CustomerId, Customer] = load_customers()
+            for config in customers.values():
+                globals_config: Dict[str, Dict] = config.get("globals", {})
+                if "logo" in globals_config:
+                    del globals_config["logo"]
+            save_customers(customers)
+        except MKGeneralException:
+            pass
+
+    def _fix_agent_receiver_symlinks(self) -> None:
+        """Change absolute paths in registered hosts symlinks in var/agent-receiver/received-outputs to relative"""
+        link_manager = get_uuid_link_manager()
+
+        for link in link_manager:
+            if link.target.is_absolute():
+                link.unlink()
+                link_manager.create_link(link.hostname, link.uuid, create_target_dir=False)
+
+    def _update_license_usage_history(self) -> None:
+        """Add site hash during license usage report update. Previously it was only added while submission"""
+        history_filepath = cmk.utils.paths.license_usage_dir.joinpath("history.json")
+        save_bytes_to_file(
+            history_filepath,
+            LicenseUsageHistoryDump.deserialize(
+                load_bytes_from_file(history_filepath, default=b"{}"),
+                hash_site_id(cmk.utils.site.omd_site()),
+            ).serialize(),
+        )
 
 
 class PasswordSanitizer:

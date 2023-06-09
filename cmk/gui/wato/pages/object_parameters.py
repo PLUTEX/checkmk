@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Mode for displaying and modifying the rule based host and service
@@ -541,8 +541,9 @@ class ModeObjectParameters(WatoMode):
             # We have a setting
             elif valuespec:
                 if ruleset.match_type() == "all":
-                    for s in setting:
-                        html.write_text(valuespec.value_to_html(s))
+                    html.write_text(
+                        HTML(", ").join([valuespec.value_to_html(value) for value in setting])
+                    )
                 else:
                     html.write_text(valuespec.value_to_html(setting))
 

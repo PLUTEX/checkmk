@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Check_MK's library for code used by different components of Check_MK.
@@ -10,7 +10,7 @@ does not offer stable APIs. The code may change at any time."""
 
 from __future__ import annotations
 
-__version__ = "2.1.0p16"
+__version__ = "2.1.0p29"
 
 import datetime
 import enum

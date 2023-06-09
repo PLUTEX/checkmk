@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -57,7 +57,8 @@ import cmk.utils.regex
 from cmk.utils.encryption import Encrypter, fetch_certificate_details
 from cmk.utils.plugin_registry import Registry
 from cmk.utils.render import SecondsRenderer
-from cmk.utils.type_defs import Seconds
+from cmk.utils.type_defs import Seconds, user_id_22_regex
+from cmk.utils.urls import is_allowed_url
 
 import cmk.gui.forms as forms
 import cmk.gui.sites as sites
@@ -65,7 +66,7 @@ import cmk.gui.utils as utils
 import cmk.gui.utils.escaping as escaping
 from cmk.gui.exceptions import MKGeneralException, MKUserError
 from cmk.gui.globals import config, html, output_funnel, request, theme, user
-from cmk.gui.htmllib import HTMLTagAttributes
+from cmk.gui.htmllib import DryRunHTMLGenerator, HTMLTagAttributes
 from cmk.gui.htmllib.foldable_container import foldable_container
 from cmk.gui.http import UploadedFile
 from cmk.gui.i18n import _
@@ -340,7 +341,8 @@ class FixedValue(ValueSpec[_VT]):
     def validate_datatype(self, value: _VT, varprefix: str) -> None:
         if not self._value == value:
             raise MKUserError(
-                varprefix, _("Invalid value, must be '%r' but is '%r'") % (self._value, value)
+                varprefix,
+                _("Invalid value, must be '%r' but is '%r'") % (self._value, value),
             )
 
 
@@ -388,7 +390,10 @@ class Age(ValueSpec[Seconds]):
                 val += takeover
                 takeover = 0
                 html.text_input(
-                    varprefix + "_" + uid, default_value=str(val), size=4, cssclass="number"
+                    varprefix + "_" + uid,
+                    default_value=str(val),
+                    size=4,
+                    cssclass="number",
                 )
                 html.write_text(" %s " % title)
             else:
@@ -704,7 +709,8 @@ class TextInput(ValueSpec[str]):
             for c in self._forbidden_chars:
                 if c in value:
                     raise MKUserError(
-                        varprefix, _("The character <tt>%s</tt> is not allowed here.") % c
+                        varprefix,
+                        _("The character <tt>%s</tt> is not allowed here.") % c,
                     )
 
         if not self._allow_empty and value.strip() == "":
@@ -719,11 +725,13 @@ class TextInput(ValueSpec[str]):
 
         if self._minlen is not None and len(value) < self._minlen:
             raise MKUserError(
-                varprefix, _("You need to provide at least %d characters.") % self._minlen
+                varprefix,
+                _("You need to provide at least %d characters.") % self._minlen,
             )
         if self._maxlen is not None and len(value) > self._maxlen:
             raise MKUserError(
-                varprefix, _("You must not provide more than %d characters.") % self._maxlen
+                varprefix,
+                _("You must not provide more than %d characters.") % self._maxlen,
             )
 
     def value_to_json(self, value: str) -> JSONValue:
@@ -766,10 +774,10 @@ def ID(**kwargs):
 # TODO: Cleanup kwargs
 def UserID(**kwargs):
     return TextInput(
-        regex=re.compile(r"^[\w][-\w.@]*$", re.UNICODE),
+        regex=user_id_22_regex(),
         regex_error=_(
-            "An identifier must only consist of letters, digits, dash, dot, "
-            "at and underscore. But it must start with a digit, letter or underscore."
+            "An identifier must only consist of letters, digits, dollar, underscore, dash, dot, "
+            "and at. It must start with a letter, digit, dollar, or underscore."
         ),
         **kwargs,
     )
@@ -994,7 +1002,8 @@ class EmailAddress(TextInput):
             # Note that the current regex allows multiple subsequent "." which are
             # not allowed by RFC5322.
             regex=re.compile(
-                r"^[\w.!#$%&'*+-=?^`{|}~]+@(localhost|[\w.-]+\.[\w]{2,24})$", re.I | re.UNICODE
+                r"^[\w.!#$%&'*+-=?^`{|}~]+@(localhost|[\w.-]+\.[\w]{2,24})$",
+                re.I | re.UNICODE,
             ),
             regex_error=regex_error,
             minlen=minlen,
@@ -1377,7 +1386,9 @@ class Url(TextInput):
         # Remove trailing / if the url does not contain any path component
         if self._show_as_link:
             return html.render_a(
-                text, href=value, target=self._link_target if self._link_target else None
+                text,
+                href=value,
+                target=self._link_target if self._link_target else None,
             )
 
         return value
@@ -1415,12 +1426,14 @@ def CheckMKVersion(
     # ValueSpec
     title: _Optional[str] = None,
     default_value: Union[Sentinel, str] = DEF_VALUE,
+    validate: _Optional[ValueSpecValidateFunc] = None,
 ):
     return TextInput(
         regex=r"[0-9]+\.[0-9]+\.[0-9]+([bpi][0-9]+|i[0-9]+p[0-9]+)?$",
         regex_error=_("This is not a valid Checkmk version number"),
         title=title,
         default_value=default_value,
+        validate=validate,
     )
 
 
@@ -1492,7 +1505,12 @@ class TextAreaUnicode(TextInput):
             value = ""  # should never happen, but avoids exception for invalid input
         if self._rows == "auto":
             func = "cmk.valuespecs.textarea_resize(this);"
-            attrs = {"onkeyup": func, "onmousedown": func, "onmouseup": func, "onmouseout": func}
+            attrs = {
+                "onkeyup": func,
+                "onmousedown": func,
+                "onmouseup": func,
+                "onmouseout": func,
+            }
             if request.has_var(varprefix):
                 rows = len(self.from_html_vars(varprefix).splitlines())
             else:
@@ -1507,7 +1525,12 @@ class TextAreaUnicode(TextInput):
             attrs["class"] = "tt"
 
         html.text_area(
-            varprefix, value, rows=rows, cols=self._cols, try_max_width=self._try_max_width, **attrs
+            varprefix,
+            value,
+            rows=rows,
+            cols=self._cols,
+            try_max_width=self._try_max_width,
+            **attrs,
         )
 
     # Overridden because we do not want to strip() here and remove '\r'
@@ -1603,7 +1626,8 @@ class Filename(TextInput):
         directory = Path(value).parent
         if not directory.is_dir():
             raise MKUserError(
-                varprefix, _("The directory %s does not exist or is not a directory.") % directory
+                varprefix,
+                _("The directory %s does not exist or is not a directory.") % directory,
             )
 
         # Write permissions to the file cannot be checked here since we run with Apache
@@ -1730,7 +1754,8 @@ class ListOfStrings(ValueSpec):
     def validate_datatype(self, value: list[_VT], varprefix: str) -> None:
         if not isinstance(value, list):
             raise MKUserError(
-                varprefix, _("Expected data type is list, but your type is %s.") % _type_name(value)
+                varprefix,
+                _("Expected data type is list, but your type is %s.") % _type_name(value),
             )
         for nr, s in enumerate(value):
             self._valuespec.validate_datatype(s, varprefix + "_%d" % nr)
@@ -1915,7 +1940,11 @@ class ListOf(ValueSpec):
             varprefix + "_add",
             self._add_label,
             "cmk.valuespecs.listof_add(%s, %s, %s)"
-            % (json.dumps(varprefix), json.dumps(self._magic), json.dumps(self._style.value)),
+            % (
+                json.dumps(varprefix),
+                json.dumps(self._magic),
+                json.dumps(self._style.value),
+            ),
         )
 
         if self._sort_by is not None:
@@ -1923,7 +1952,11 @@ class ListOf(ValueSpec):
                 varprefix + "_sort",
                 _("Sort"),
                 "cmk.valuespecs.listof_sort(%s, %s, %s)"
-                % (json.dumps(varprefix), json.dumps(self._magic), json.dumps(self._sort_by)),
+                % (
+                    json.dumps(varprefix),
+                    json.dumps(self._magic),
+                    json.dumps(self._sort_by),
+                ),
             )
 
     def _show_reference_entry(self, varprefix: str, index: str, value: Any) -> None:
@@ -1938,7 +1971,9 @@ class ListOf(ValueSpec):
 
         elif self._style == ListOf.Style.FLOATING:
             html.open_div(
-                id_="%s_prototype" % varprefix, class_="vlof_prototype", style="display:none;"
+                id_="%s_prototype" % varprefix,
+                class_="vlof_prototype",
+                style="display:none;",
             )
 
             self._show_entry(varprefix, index, value)
@@ -1961,7 +1996,8 @@ class ListOf(ValueSpec):
 
         elif self._style == ListOf.Style.FLOATING:
             html.open_div(
-                id_="%s_container" % varprefix, class_=["valuespec_listof_floating_container"]
+                id_="%s_container" % varprefix,
+                class_=["valuespec_listof_floating_container"],
             )
 
             for nr, v in enumerate(value):
@@ -2028,9 +2064,11 @@ class ListOf(ValueSpec):
         if not value:
             return self._text_if_empty
 
-        return html.render_table(
+        html_generator = DryRunHTMLGenerator()
+        return html_generator.render_table(
             HTML().join(
-                html.render_tr(html.render_td(self._valuespec.value_to_html(v))) for v in value
+                html_generator.render_tr(html_generator.render_td(self._valuespec.value_to_html(v)))
+                for v in value
             )
         )
 
@@ -2612,7 +2650,10 @@ class DropdownChoice(ValueSpec):
         ):
             defval = value
             options.append(
-                (defval, self._get_invalid_choice_text(self._invalid_choice_title, value))
+                (
+                    defval,
+                    self._get_invalid_choice_text(self._invalid_choice_title, value),
+                )
             )
 
         if value is None and not options:
@@ -3134,7 +3175,10 @@ class CascadingDropdown(ValueSpec[CascadingDropdownChoiceValue]):
                 def_val = str(nr)
 
         vp = varprefix + "_sel"
-        onchange = "cmk.valuespecs.cascading_change(this, '%s', %d);" % (varprefix, len(choices))
+        onchange = "cmk.valuespecs.cascading_change(this, '%s', %d);" % (
+            varprefix,
+            len(choices),
+        )
         if self._label:
             html.span(self._label, class_="vs_floating_text")
         html.dropdown(vp, options, deflt=def_val, onchange=onchange, ordered=self._sorted)
@@ -3283,6 +3327,8 @@ class CascadingDropdown(ValueSpec[CascadingDropdownChoiceValue]):
         try:
             vs.validate_datatype(value[1], "")
             return [ident, vs.value_to_json(value[1])]
+        except MKUserError as e:
+            raise MKUserError(e.varname, e.message) from e
         except Exception:  # TODO: fix exc
             return
 
@@ -3371,11 +3417,15 @@ class CascadingDropdown(ValueSpec[CascadingDropdownChoiceValue]):
                 if vs:
                     if not isinstance(value, tuple) or len(value) != 2:
                         raise MKUserError(
-                            varprefix + "_sel", _("Value must be a tuple with two elements.")
+                            varprefix + "_sel",
+                            _("Value must be a tuple with two elements."),
                         )
                     vs.validate_datatype(value[1], varprefix + "_%d" % nr)
                 return
-        raise MKUserError(varprefix + "_sel", _("Value %r is not allowed here.") % value)
+        raise MKUserError(
+            varprefix + "_sel",
+            _("Value %r is not allowed here. Please check your configuration.") % value,
+        )
 
     def _validate_value(self, value: CascadingDropdownChoiceValue, varprefix: str) -> None:
         if self._no_preselect and value == self._no_preselect_value:
@@ -4135,7 +4185,8 @@ class AbsoluteDate(ValueSpec):
                 raise MKUserError(varname, _("Please enter a valid number"))
             if part < mmin or part > mmax:
                 raise MKUserError(
-                    varname, _("The value for %s must be between %d and %d") % (title, mmin, mmax)
+                    varname,
+                    _("The value for %s must be between %d and %d") % (title, mmin, mmax),
                 )
             parts.append(part)
 
@@ -4261,12 +4312,14 @@ class Timeofday(ValueSpec):
 
         if not isinstance(value, tuple):
             raise MKUserError(
-                varprefix, _("The datatype must be tuple, but ist %s") % _type_name(value)
+                varprefix,
+                _("The datatype must be tuple, but ist %s") % _type_name(value),
             )
 
         if len(value) != 2:
             raise MKUserError(
-                varprefix, _("The tuple must contain two elements, but you have %d") % len(value)
+                varprefix,
+                _("The tuple must contain two elements, but you have %d") % len(value),
             )
 
         for x in value:
@@ -4370,12 +4423,14 @@ class TimeofdayRange(ValueSpec):
 
         if not isinstance(value, tuple):
             raise MKUserError(
-                varprefix, _("The datatype must be tuple, but ist %s") % _type_name(value)
+                varprefix,
+                _("The datatype must be tuple, but ist %s") % _type_name(value),
             )
 
         if len(value) != 2:
             raise MKUserError(
-                varprefix, _("The tuple must contain two elements, but you have %d") % len(value)
+                varprefix,
+                _("The tuple must contain two elements, but you have %d") % len(value),
             )
 
         self._bounds[0].validate_datatype(value[0], varprefix + "_from")
@@ -4460,7 +4515,9 @@ class Timerange(CascadingDropdown):
         self,
         include_time: bool = False,
         choices: Union[
-            None, list[CascadingDropdownChoice], Callable[[], list[CascadingDropdownChoice]]
+            None,
+            list[CascadingDropdownChoice],
+            Callable[[], list[CascadingDropdownChoice]],
         ] = None,
         # CascadingDropdown
         # TODO: Make this more specific
@@ -4645,7 +4702,8 @@ class Timerange(CascadingDropdown):
             from_time, until_time = rangespec[1]
             if from_time > until_time:
                 raise MKUserError(
-                    "avo_rangespec_9_0_year", _("The end date must be after the start date")
+                    "avo_rangespec_9_0_year",
+                    _("The end date must be after the start date"),
                 )
             if rangespec[0] == "date":
                 # This includes the end day
@@ -4680,7 +4738,8 @@ class Timerange(CascadingDropdown):
                 return ComputedTimerange((int(now), int(now + rangespec[1])), title)
             if isinstance(rangespec, tuple) and rangespec[0] == "until":
                 return ComputedTimerange(
-                    (int(now), int(rangespec[1])), str(AbsoluteDate().value_to_html(rangespec[1]))
+                    (int(now), int(rangespec[1])),
+                    str(AbsoluteDate().value_to_html(rangespec[1])),
                 )
             if isinstance(rangespec, tuple) and rangespec[0] in ["date", "time"]:
                 return _fixed_dates(rangespec)
@@ -4963,7 +5022,10 @@ class Alternative(ValueSpec):
                 sel_option = str(nr)
             the_title = vs.title()
             options.append((str(nr), "???" if the_title is None else the_title))
-        onchange = "cmk.valuespecs.cascading_change(this, '%s', %d);" % (varprefix, len(options))
+        onchange = "cmk.valuespecs.cascading_change(this, '%s', %d);" % (
+            varprefix,
+            len(options),
+        )
         if self._on_change:
             onchange += self._on_change
         if self._orientation == "horizontal":
@@ -5075,6 +5137,15 @@ class Alternative(ValueSpec):
         for nr, v in enumerate(self._elements):
             if vs == v:
                 vs.validate_value(value, varprefix + "_%d" % nr)
+
+    def transform_value(self, value):
+        vs, value = self.matching_alternative(value)
+        if not vs:
+            raise MKUserError(
+                None,
+                _("Found no matching alternative."),
+            )
+        return vs.transform_value(value)
 
 
 class Tuple(ValueSpec):
@@ -5199,7 +5270,8 @@ class Tuple(ValueSpec):
     def validate_datatype(self, value, varprefix):
         if not isinstance(value, tuple):
             raise MKUserError(
-                varprefix, _("The datatype must be a tuple, but is %s") % _type_name(value)
+                varprefix,
+                _("The datatype must be a tuple, but is %s") % _type_name(value),
             )
         if len(value) != len(self._elements):
             raise MKUserError(
@@ -5360,7 +5432,10 @@ class Dictionary(ValueSpec[dict[str, Any]]):
 
             html.open_div(
                 id_=div_id,
-                class_=["dictelement", "indent" if (self._indent and not two_columns) else None],
+                class_=[
+                    "dictelement",
+                    "indent" if (self._indent and not two_columns) else None,
+                ],
                 style="display:none;" if not visible else None,
             )
 
@@ -5494,13 +5569,14 @@ class Dictionary(ValueSpec[dict[str, Any]]):
 
     def _value_to_html_multiline(self, elem: DictionaryElements, value: Any) -> HTML:
         s = HTML()
+        generator = DryRunHTMLGenerator()
         for param, vs in elem:
             if param in value:
-                s += html.render_tr(
-                    html.render_td("%s:&nbsp;" % vs.title(), class_="title")
-                    + html.render_td(vs.value_to_html(value[param]))
+                s += generator.render_tr(
+                    generator.render_td("%s:&nbsp;" % vs.title(), class_="title")
+                    + generator.render_td(vs.value_to_html(value[param]))
                 )
-        return html.render_table(s)
+        return generator.render_table(s)
 
     def value_to_json(self, value):
         return {
@@ -5539,7 +5615,8 @@ class Dictionary(ValueSpec[dict[str, Any]]):
 
         if not isinstance(value, dict):
             raise MKUserError(
-                varprefix, _("The type must be a dictionary, but it is a %s") % _type_name(value)
+                varprefix,
+                _("The type must be a dictionary, but it is a %s") % _type_name(value),
             )
 
         for param, vs in self._get_elements():
@@ -5661,7 +5738,8 @@ class ElementSelection(ValueSpec):
             raise MKUserError(varprefix, _("You cannot save this rule.") + " " + self._empty_text)
         if value not in self._elements:
             raise MKUserError(
-                varprefix, _("%s is not an existing element in this selection.") % (value,)
+                varprefix,
+                _("%s is not an existing element in this selection.") % (value,),
             )
 
     def validate_datatype(self, value, varprefix):
@@ -5675,7 +5753,8 @@ class ElementSelection(ValueSpec):
 
         if not isinstance(value, str):
             raise MKUserError(
-                varprefix, _("The datatype must be str (string), but is %s") % _type_name(value)
+                varprefix,
+                _("The datatype must be str (string), but is %s") % _type_name(value),
             )
 
 
@@ -6059,7 +6138,8 @@ class FileUpload(ValueSpec):
 
         if not self._allow_empty_content and not content:
             raise MKUserError(
-                varprefix, _("The selected file is empty. Please select a non-empty file.")
+                varprefix,
+                _("The selected file is empty. Please select a non-empty file."),
             )
         if self._allowed_extensions is not None:
             matched = False
@@ -6648,11 +6728,13 @@ class IconSelector(ValueSpec):
         value = self._transform_icon_str(value)
         if not (value["icon"] is None or isinstance(value["icon"], str)):
             raise MKUserError(
-                varprefix, _("The icon type is %s, but should be str") % type(value["icon"])
+                varprefix,
+                _("The icon type is %s, but should be str") % type(value["icon"]),
             )
         if not (value["emblem"] is None or isinstance(value["emblem"], str)):
             raise MKUserError(
-                varprefix, _("The emblem type is %s, but should be str") % type(value["emblem"])
+                varprefix,
+                _("The emblem type is %s, but should be str") % type(value["emblem"]),
             )
 
     def _validate_value(self, value, varprefix):
@@ -6878,7 +6960,10 @@ def SchedulePeriod(from_end=True, **kwargs):
         ),
     ]
     return CascadingDropdown(
-        title=_("Period"), orientation="horizontal", choices=dwm + from_end_choice, **kwargs
+        title=_("Period"),
+        orientation="horizontal",
+        choices=dwm + from_end_choice,
+        **kwargs,
     )
 
 
@@ -6990,7 +7075,8 @@ class CAorCAChain(UploadOrPasteTextFile):
     def analyse_cert(self, value):
         # ? type of the value argument is unclear
         cert = crypto.load_certificate(
-            crypto.FILETYPE_PEM, ensure_binary(value)  # pylint: disable= six-ensure-str-bin-call
+            crypto.FILETYPE_PEM,
+            ensure_binary(value),  # pylint: disable= six-ensure-str-bin-call
         )
         titles = {
             "C": _("Country"),
@@ -7175,7 +7261,7 @@ class RuleComment(TextAreaUnicode):
 
 def DocumentationURL() -> TextInput:
     def _validate_documentation_url(value: str, varprefix: str) -> None:
-        if utils.is_allowed_url(value, cross_domain=True, schemes=["http", "https"]):
+        if is_allowed_url(value, cross_domain=True, schemes=["http", "https"]):
             return
         raise MKUserError(
             varprefix,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -19,7 +19,29 @@ managedtest = pytest.mark.skipif(not version.is_managed_edition(), reason="see #
 
 @managedtest
 @pytest.mark.parametrize("group_type", ["host", "contact", "service"])
-def test_openapi_groups(monkeypatch, group_type, aut_user_auth_wsgi_app: WebTestAppForCMK):
+def test_required_alias_field_create(
+    base: str, group_type: str, aut_user_auth_wsgi_app: WebTestAppForCMK
+) -> None:
+
+    group = {"name": "RandleMcMurphy", "customer": "provider"}
+
+    aut_user_auth_wsgi_app.call_method(
+        "post",
+        base + f"/domain-types/{group_type}_group_config/collections/all",
+        params=json.dumps(group),
+        status=400,
+        headers={"Accept": "application/json"},
+        content_type="application/json",
+    )
+
+
+@managedtest
+@pytest.mark.parametrize("group_type", ["host", "contact", "service"])
+def test_openapi_groups(
+    monkeypatch: pytest.MonkeyPatch,
+    group_type: str,
+    aut_user_auth_wsgi_app: WebTestAppForCMK,
+) -> None:
 
     name = _random_string(10)
     alias = _random_string(10)

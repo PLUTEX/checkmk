@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1191,11 +1191,11 @@ class HosttagMatchPlugin(ABCLivestatusMatchPlugin):
         used_filters: UsedFilters,
         rows: Rows,
     ) -> Matches:
-        # "svcsearch" and "allservices" are needed for Multi-Filter use
+        # "searchsvc" and "allservices" are needed for Multi-Filter use
         supported_views = {
             "searchhost": "host_regex",
             "host": "host",
-            "svcsearch": "svcsearch",
+            "searchsvc": "searchsvc",
             "allservices": "allservices",
         }
 
@@ -1203,7 +1203,7 @@ class HosttagMatchPlugin(ABCLivestatusMatchPlugin):
         if not filter_name:
             return None
 
-        if row and filter_name not in ["allservices", "svcsearch"]:
+        if row and filter_name not in ["allservices", "searchsvc"]:
             hostname = row.get("host_name", row.get("name"))
             return hostname, [(filter_name, hostname)]
 

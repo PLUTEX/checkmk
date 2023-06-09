@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1389,7 +1389,7 @@ def reclassify_config_by_annotation(
     new_entry: AVSpan,
     new_config: ReclassifyConfig,
 ) -> AVSpan:
-    if new_config.downtime:
+    if new_config.downtime is not None:
         new_entry["in_downtime"] = 1 if annotation["downtime"] else 0
         # If the annotation removes a downtime from the services, but
         # the actual reason for the service being in downtime is a host
@@ -2093,6 +2093,8 @@ def layout_timeline(
     for row_nr, (row, state_id) in enumerate(timeline_rows):
         this_from_time = row["from"]
         this_until_time = row["until"]
+        # If timeline span begins after timeline beginning time, add
+        # unmonitored span in front
         if this_from_time > current_time:  # GAP
             spans.append(
                 (
@@ -2164,6 +2166,17 @@ def layout_timeline(
 
             width += min_percentage
             spans.append((row_nr, title, width, css))
+    # If timeline span ends before the current time, fill it up with
+    # unmonitored entry until end
+    if avoptions["service_period"] == "honor" and current_time < until_time:  # GAP
+        spans.append(
+            (
+                None,
+                "",
+                100.0 * (until_time - current_time) / total_duration,
+                "unmonitored",
+            )
+        )
 
     if chaos_count > 1 and chaos_begin and chaos_end:
         spans.append(chaos_period(chaos_begin, chaos_end, chaos_count, chaos_width))
@@ -2429,7 +2442,7 @@ def get_bi_leaf_history(
 
         for site, host, service in timeline_container.aggr_compiled_branch.required_elements():
             this_service = service or ""
-            by_host.setdefault(host, set()).add(this_service)
+            by_host.setdefault(host, {""}).add(this_service)
             timeline_container.host_service_info.add((host, this_service))
             timeline_container.host_service_info.add((host, ""))
 

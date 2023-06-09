@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """This module provides generic Check_MK ruleset processing functionality"""
@@ -367,17 +367,21 @@ class RulesetOptimizer:
         return self._all_processed_hosts
 
     def set_all_processed_hosts(self, all_processed_hosts: Set[HostName]) -> None:
-        self._all_processed_hosts = set(all_processed_hosts)
-
-        nodes_and_clusters: Set[HostName] = set()
+        involved_clusters: Set[HostName] = set()
+        involved_nodes: Set[HostName] = set()
         for hostname in self._all_processed_hosts:
-            nodes_and_clusters.update(self._nodes_of.get(hostname, []))
-            nodes_and_clusters.update(self._clusters_of.get(hostname, []))
+            involved_nodes.update(self._nodes_of.get(hostname, []))
+            involved_clusters.update(self._clusters_of.get(hostname, []))
+
+        # Also add all nodes of used clusters
+        for hostname in involved_clusters:
+            involved_nodes.update(self._nodes_of.get(hostname, []))
+
+        nodes_and_clusters = involved_clusters | involved_nodes | set(all_processed_hosts)
 
         # Only add references to configured hosts
         nodes_and_clusters.intersection_update(self._all_configured_hosts)
-
-        self._all_processed_hosts.update(nodes_and_clusters)
+        self._all_processed_hosts = nodes_and_clusters
 
         # The folder host lookup includes a list of all -processed- hosts within a given
         # folder. Any update with set_all_processed hosts invalidates this cache, because

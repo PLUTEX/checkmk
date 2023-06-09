@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Create a ntop mkp
@@ -35,7 +35,7 @@ NTOP_PACKAGE_INFO: packaging.PackageInfo = {
     "version.packaged": cmk_version.__version__,
     "version.min_required": cmk_version.__version__,
     "version.usable_until": None,
-    "author": "tribe29 GmbH",
+    "author": "Checkmk GmbH",
     "download_url": "https://checkmk.com/",
     "files": {
         "web": [ntop_file.replace(ENTERPRISE_PREFIX, "") for ntop_file in MKP_ABLE_NTOP_FILES]

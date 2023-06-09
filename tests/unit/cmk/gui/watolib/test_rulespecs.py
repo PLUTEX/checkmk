@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -550,6 +550,7 @@ def test_grouped_rulespecs():
             "clustered_services_mapping",
             "extra_host_conf:service_period",
             "extra_service_conf:service_period",
+            "cmc_graphite_host_metrics",
             "cmc_graphite_service_metrics",
             "cmc_service_rrd_config",
             "cmc_host_rrd_config",

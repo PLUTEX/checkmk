@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -338,7 +338,11 @@ def notify_notify(raw_context: EventContext, analyse: bool = False) -> Optional[
     logger.debug(events.render_context_dump(raw_context))
 
     raw_context["LOGDIR"] = notification_logdir
-    events.complete_raw_context(raw_context, with_dump=config.notification_logging <= 10)
+    events.complete_raw_context(
+        raw_context,
+        with_dump=config.notification_logging <= 10,
+        contacts_needed=True,
+    )
 
     # Spool notification to remote host, if this is enabled
     if config.notification_spooling in ("remote", "both"):

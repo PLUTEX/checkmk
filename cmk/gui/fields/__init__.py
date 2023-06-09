@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -25,6 +25,7 @@ from cmk.gui.fields.attributes import (
     NetworkScanResult,
     SNMPCredentials,
 )
+from cmk.gui.fields.custom_fields import AuxTagIDField
 from cmk.gui.fields.definitions import (
     attributes_field,
     column_field,
@@ -54,6 +55,7 @@ from cmk.gui.fields.validators import (
 
 __all__ = [
     "attributes_field",
+    "AuxTagIDField",
     "column_field",
     "customer_field",
     "CustomAttributes",

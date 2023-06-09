@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1455,10 +1455,14 @@ class PainterCheckManpage(Painter):
         else:
             checktype = command[9:]
 
-        page = man_pages.load_man_page(checktype)
-
-        if page is None:
-            return "", _("Man page %s not found.") % checktype
+        if (
+            page := man_pages.load_man_page(
+                checktype.split()[
+                    0
+                ]  # some checks are run as commandlines (e.g. checks configured via the "Integrate nagios plugins" rule).
+            )
+        ) is None:
+            return "", ""
 
         description = (
             escaping.escape_attribute(page["header"]["description"])
@@ -1534,7 +1538,10 @@ def _paint_custom_notes(what: str, row: Row) -> CellSpec:
     host = row["host_name"]
     svc = row.get("service_description")
     if what == "service":
-        dirs = [Path(cmk.utils.paths.default_config_dir) / "notes/services" / host]
+        dirs = [
+            Path(cmk.utils.paths.default_config_dir) / "notes/services" / host,
+            Path(cmk.utils.paths.default_config_dir) / "notes/services" / "*",
+        ]
         item = svc
     else:
         dirs = [Path(cmk.utils.paths.default_config_dir) / "notes/hosts"]

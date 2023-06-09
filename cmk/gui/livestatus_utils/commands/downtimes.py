@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """This module contains commands for managing downtimes through LiveStatus."""
 import datetime as dt
 from typing import Dict, List, Literal, Optional, Union
 
-from livestatus import SiteId
+from livestatus import MultiSiteConnection, SiteId
 
 from cmk.utils.livestatus_helpers import tables
 from cmk.utils.livestatus_helpers.expressions import Or, QueryExpression
@@ -15,7 +15,9 @@ from cmk.utils.livestatus_helpers.queries import detailed_connection, Query
 from cmk.utils.livestatus_helpers.tables.downtimes import Downtimes
 from cmk.utils.livestatus_helpers.tables.hosts import Hosts
 from cmk.utils.livestatus_helpers.tables.services import Services
+from cmk.utils.type_defs import UserId
 
+from cmk.gui.exceptions import MKAuthException
 from cmk.gui.globals import user as _user
 from cmk.gui.livestatus_utils.commands.lowlevel import send_command
 from cmk.gui.livestatus_utils.commands.type_defs import LivestatusCommand
@@ -183,7 +185,7 @@ def schedule_services_downtimes_with_query(
 
 def schedule_service_downtime(
     connection,
-    site_id: SiteId,
+    site_id: Optional[SiteId],
     host_name: str,
     service_description: Union[List[str], str],
     start_time: dt.datetime,
@@ -241,7 +243,7 @@ def schedule_service_downtime(
             A comment which will be added to the downtime.
 
         site_id:
-            Site which is targeted by command
+            An optional Site which is targeted by the command. Defaults to the local site if 'None'.
 
     See Also:
         https://assets.nagios.com/downloads/nagioscore/docs/externalcmds/cmdinfo.php?command_id=119
@@ -667,10 +669,34 @@ def schedule_host_downtime(
             )
 
 
+def assert_object_is_visible_to_user(
+    live: MultiSiteConnection, host: str, service: Union[str, None], user: UserId
+) -> None:
+    if service is None:
+        query = Query.from_string(
+            "\n".join(
+                [
+                    "GET hosts",
+                    "Columns: host_name",
+                    f"Filter: host_name = {host}",
+                    f"AuthUser: {user}",
+                ]
+            )
+        )
+        fail_msg = f"Host {host}"
+    else:
+        query = Query.from_string(
+            f"GET services\nColumns: service_description\nFilter: service_description = {service}\nFilter: host_name = {host}\nAuthUser: {user}"
+        )
+        fail_msg = f"Service '{service}' of {host}"
+    if not len(query.fetch_values(live)) != 0:
+        raise MKAuthException(f"Cannot find the requested resource: {fail_msg}")
+
+
 def _schedule_downtime(
     sites,
     command: LivestatusCommand,
-    site_id,
+    site_id: Optional[SiteId],
     host_or_group: str,
     service_description: Optional[str],
     start_time: dt.datetime,
@@ -689,6 +715,8 @@ def _schedule_downtime(
     """
     # TODO: provide reference documents for recurring magic numbers
     _user.need_permission("action.downtimes")
+    if _user.id is not None:
+        assert_object_is_visible_to_user(sites, host_or_group, service_description, _user.id)
 
     recur_mode = _recur_mode(recur, duration)
 

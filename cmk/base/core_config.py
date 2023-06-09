@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 import abc
+import dataclasses
 import numbers
 import os
 import shutil
@@ -38,6 +39,8 @@ from cmk.utils.config_path import VersionedConfigPath
 from cmk.utils.exceptions import MKGeneralException
 from cmk.utils.log import console
 from cmk.utils.parameters import TimespecificParameters
+from cmk.utils.paths import core_helper_config_dir
+from cmk.utils.store import load_object_from_file, save_object_to_file
 from cmk.utils.type_defs import (
     CheckPluginName,
     ConfigurationWarnings,
@@ -67,6 +70,12 @@ ObjectMacros = Dict[str, AnyStr]
 CoreCommandName = str
 CoreCommand = str
 CheckCommandArguments = Iterable[Union[int, float, str, Tuple[str, str, str]]]
+
+
+@dataclasses.dataclass(frozen=True)
+class CollectedHostLabels:
+    host_labels: Labels
+    service_labels: dict[ServiceName, Labels]
 
 
 class MonitoringCore(abc.ABC):
@@ -297,7 +306,11 @@ def check_icmp_arguments_of(
 #   '----------------------------------------------------------------------'
 
 
-def do_create_config(core: MonitoringCore, hosts_to_update: HostsToUpdate = None) -> None:
+def do_create_config(
+    core: MonitoringCore,
+    hosts_to_update: HostsToUpdate = None,
+    skip_config_locking_in_bakery: bool = False,
+) -> None:
     """Creating the monitoring core configuration and additional files
 
     Ensures that everything needed by the monitoring core and it's helper processes is up-to-date
@@ -312,15 +325,15 @@ def do_create_config(core: MonitoringCore, hosts_to_update: HostsToUpdate = None
             raise
         raise MKGeneralException("Error creating configuration: %s" % e)
 
-    _bake_on_restart()
+    _bake_on_restart(skip_config_locking_in_bakery)
 
 
-def _bake_on_restart():
+def _bake_on_restart(skip_locking_config: bool) -> None:
     try:
         # Local import is needed, because this is not available in all environments
         import cmk.base.cee.bakery.agent_bakery as agent_bakery  # pylint: disable=redefined-outer-name,import-outside-toplevel
 
-        agent_bakery.bake_on_restart()
+        agent_bakery.bake_on_restart(skip_locking_config)
     except ImportError:
         pass
 
@@ -480,6 +493,7 @@ def iter_active_check_services(
     hostname: str,
     host_attrs: config.ObjectAttributes,
     params: Dict[Any, Any],
+    stored_passwords: Mapping[str, str],
 ) -> Iterator[Tuple[str, str]]:
     """Iterate active service descriptions and arguments
 
@@ -498,7 +512,10 @@ def iter_active_check_services(
         host_config.hostname, host_config.alias, check_name, params
     )
     arguments = active_check_arguments(
-        host_config.hostname, description, active_info["argument_function"](params)
+        host_config.hostname,
+        description,
+        active_info["argument_function"](params),
+        stored_passwords,
     )
 
     yield description, arguments
@@ -508,6 +525,7 @@ def active_check_arguments(
     hostname: HostName,
     description: Optional[ServiceName],
     args: config.SpecialAgentInfoFunctionResult,
+    stored_passwords: Union[Mapping[str, str], None] = None,
 ) -> str:
     if isinstance(args, str):
         return args
@@ -525,11 +543,19 @@ def active_check_arguments(
             % (hostname, description)
         )
 
-    return _prepare_check_command(cmd_args, hostname, description)
+    return _prepare_check_command(
+        cmd_args,
+        hostname,
+        description,
+        cmk.utils.password_store.load() if stored_passwords is None else stored_passwords,
+    )
 
 
 def _prepare_check_command(
-    command_spec: CheckCommandArguments, hostname: HostName, description: Optional[ServiceName]
+    command_spec: CheckCommandArguments,
+    hostname: HostName,
+    description: Optional[ServiceName],
+    stored_passwords: Mapping[str, str],
 ) -> str:
     """Prepares a check command for execution by Checkmk
 
@@ -539,7 +565,6 @@ def _prepare_check_command(
     """
     passwords: List[Tuple[str, str, str]] = []
     formated: List[str] = []
-    stored_passwords = cmk.utils.password_store.load()
     for arg in command_spec:
         if isinstance(arg, (int, float)):
             formated.append("%s" % arg)
@@ -954,3 +979,47 @@ def replace_macros(s: str, macros: ObjectMacros) -> str:
                     raise
 
     return s
+
+
+def write_notify_host_file(
+    config_path: VersionedConfigPath,
+    labels_per_host: dict[HostName, CollectedHostLabels],
+) -> None:
+    notify_labels_path: Path = _get_host_file_path(config_path)
+    for host, labels in labels_per_host.items():
+        host_path = notify_labels_path / host
+        save_object_to_file(
+            host_path,
+            dataclasses.asdict(
+                CollectedHostLabels(
+                    host_labels=labels.host_labels,
+                    service_labels={k: v for k, v in labels.service_labels.items() if v.values()},
+                )
+            ),
+        )
+
+
+def read_notify_host_file(
+    host_name: HostName,
+) -> CollectedHostLabels:
+    host_file_path: Path = _get_host_file_path(host_name=host_name)
+    return CollectedHostLabels(
+        **load_object_from_file(
+            path=host_file_path,
+            default={"host_labels": {}, "service_labels": {}},
+        )
+    )
+
+
+def _get_host_file_path(
+    config_path: Optional[VersionedConfigPath] = None,
+    host_name: Optional[HostName] = None,
+) -> Path:
+    root_path = Path(config_path) if config_path else core_helper_config_dir / Path("latest")
+    if host_name:
+        return root_path / "notify" / "labels" / host_name
+    return root_path / "notify" / "labels"
+
+
+def get_labels_from_attributes(key_value_pairs: list[tuple[str, str]]) -> Labels:
+    return {key[8:]: value for key, value in key_value_pairs if key.startswith("__LABEL_")}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2022 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2022 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """This module implements password hashing and validation of password hashes.
@@ -20,6 +20,7 @@ import passlib.context  # type: ignore[import]
 import passlib.exc  # type: ignore[import]
 from passlib import hash as passlib_hash
 
+from cmk.utils.crypto.password import Password
 from cmk.utils.exceptions import MKException
 
 # Using code should not be able to change the number of rounds (to unsafe values), but test code
@@ -41,7 +42,7 @@ class PasswordInvalidError(MKException):
     """Indicates that the provided password could not be verified"""
 
 
-def hash_password(password: str, *, allow_truncation=False) -> str:
+def hash_password(password: Password, *, allow_truncation=False) -> str:
     """Hash a password using the preferred algorithm
 
     Uses bcrypt with 12 rounds to hash a password.
@@ -60,7 +61,7 @@ def hash_password(password: str, *, allow_truncation=False) -> str:
     try:
         return passlib_hash.bcrypt.using(
             rounds=BCRYPT_ROUNDS, truncate_error=not allow_truncation, ident=BCRYPT_IDENT
-        ).hash(password)
+        ).hash(password.raw)
     except passlib.exc.PasswordTruncateError as e:
         raise PasswordTooLongError(e)
 
@@ -81,7 +82,7 @@ _context = passlib.context.CryptContext(
 )
 
 
-def verify(password: str, password_hash: str) -> None:
+def verify(password: Password, password_hash: str) -> None:
     """Verify if a password matches a password hash.
 
     :param password: The password to check.
@@ -95,7 +96,7 @@ def verify(password: str, password_hash: str) -> None:
                        - if `password` or `password_hash` contain invalid characters (e.g. NUL).
     """
     try:
-        valid = _context.verify(password, password_hash)
+        valid = _context.verify(password.raw, password_hash)
     except passlib.exc.UnknownHashError:
         raise ValueError("Invalid hash")
     if not valid:

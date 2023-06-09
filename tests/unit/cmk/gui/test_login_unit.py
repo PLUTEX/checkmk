@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -13,7 +13,7 @@ import cmk.gui.login as login
 import cmk.gui.userdb as userdb
 from cmk.gui.config import load_config
 from cmk.gui.exceptions import MKAuthException
-from cmk.gui.globals import request, session, user
+from cmk.gui.globals import request, session, transactions, user
 from cmk.gui.utils.script_helpers import application_and_request_context
 
 
@@ -128,3 +128,12 @@ def test_web_server_auth_session(user_id):
             assert user.id == user_id
             assert session.user_id == user.id
         assert user.id is None
+
+
+def test_ignore_transaction_ids(request_context, monkeypatch, with_automation_user):
+    user_id, password = with_automation_user
+    request.set_var("_secret", password)
+    request.set_var("_username", user_id)
+    with login.authenticate(request):
+        assert transactions._ignore_transids
+    assert transactions._ignore_transids is False

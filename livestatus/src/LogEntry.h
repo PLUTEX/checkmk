@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -83,8 +83,9 @@ public:
         alert_handlers = 8,  // Started and stopped alert handlers
     };
 
-    // Constructed by Logfile::processLogLine(). All instances owned by
-    // Logfile::_entries.
+    /// Constructed by Logfile::processLogLine(). All instances owned by
+    /// Logfile::_entries.
+    /// Throws invalid_argument on malformed line
     LogEntry(size_t lineno, std::string line);
 
     [[nodiscard]] std::string state_info() const;

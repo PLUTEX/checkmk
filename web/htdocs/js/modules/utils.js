@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 // conditions defined in the file COPYING, which is part of this source code package.
 
@@ -566,12 +566,6 @@ function do_reload(url) {
             if (display_options.indexOf(opts[i].toUpperCase()) > -1)
                 display_options = display_options.replace(opts[i].toUpperCase(), opts[i]);
             else display_options += opts[i];
-        }
-
-        // Add optional display_options if not defined in original display_options
-        opts = ["w"];
-        for (i = 0; i < opts.length; i++) {
-            if (display_options.indexOf(opts[i].toUpperCase()) == -1) display_options += opts[i];
         }
 
         var params = {_display_options: display_options};

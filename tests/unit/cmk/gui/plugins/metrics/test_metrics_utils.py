@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -11,6 +11,7 @@ import cmk.utils.version
 import cmk.gui.metrics as metrics
 from cmk.gui.globals import config
 from cmk.gui.plugins.metrics import utils
+from cmk.gui.plugins.metrics.utils import hex_color_to_rgb_color
 from cmk.gui.type_defs import Perfdata
 
 
@@ -277,6 +278,43 @@ def test_evaluate():
 
 
 @pytest.mark.parametrize(
+    "perf_data, expression, check_command, expected_result",
+    [
+        pytest.param(
+            "util=605;;;0;100",
+            "util,100,MAX",
+            "check_mk-bintec_cpu",
+            605.0,
+        ),
+        pytest.param(
+            "user=4.600208;;;; system=1.570093;;;; io_wait=0.149533;;;;",
+            "user,system,io_wait,+,+,100,MAX",
+            "check_mk-kernel_util",
+            100.0,
+        ),
+        pytest.param(
+            "user=101.000000;;;; system=0.100000;;;; io_wait=0.010000;;;;",
+            "user,system,io_wait,+,+,100,MAX",
+            "check_mk-kernel_util",
+            101.11,
+        ),
+    ],
+)
+def test_evaluate_cpu_utilization(
+    perf_data: str, expression: str, check_command: str, expected_result: float
+) -> None:
+    # Assemble
+    assert utils.metric_info, "Global variable is empty/has not been initialized."
+    assert utils.graph_info, "Global variable is empty/has not been initialized."
+    perf_data_parsed, check_command = utils.parse_perf_data(perf_data, check_command)
+    translated_metrics = utils.translate_metrics(perf_data_parsed, check_command)
+    # Act
+    result = utils.evaluate(expression, translated_metrics)
+    # Assert
+    assert result[0] == expected_result
+
+
+@pytest.mark.parametrize(
     "elements, is_operator, apply_operator, apply_element, result",
     [
         pytest.param(
@@ -364,3 +402,14 @@ def test_horizontal_rules_from_thresholds(perf_string, result):
         )
         == result
     )
+
+
+@pytest.mark.parametrize(
+    "hex_color, expected_rgb",
+    [
+        ("#112233", (17, 34, 51)),
+        ("#123", (17, 34, 51)),
+    ],
+)
+def test_hex_color_to_rgb_color(hex_color, expected_rgb):
+    assert hex_color_to_rgb_color(hex_color) == expected_rgb

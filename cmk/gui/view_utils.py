@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -30,6 +30,19 @@ CellSpec = Tuple[CSSClass, CellContent]
 
 if TYPE_CHECKING:
     from cmk.gui.type_defs import Row
+
+# fmt: off
+_URL_PATTERN = (
+    r"("
+    r"http[s]?://"
+    r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*"  # including *all* sub-delimiters
+    # In theory, URIs are allowed to end in a sub-delimitter ("!$&'()*+,;=")
+    # We exclude the ',' here, because it is used to separate our check results,
+    # and disallowing a trailing ',' hopefully breaks fewer links than allowing it.
+    r"[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+;=%]"
+    r")"
+)
+# fmt: on
 
 
 def _prepare_button_url(p: re.Match) -> str:
@@ -89,16 +102,13 @@ def format_plugin_output(
         else False
     )
     if shall_escape and not prevent_url_icons:
-        http_url = r"(http[s]?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+)"
         # (?:&lt;A HREF=&quot;), (?: target=&quot;_blank&quot;&gt;)? and endswith(" </A>") is a special
         # handling for the HTML code produced by check_http when "clickable URL" option is active.
         output = re.sub(
-            "(?:&lt;A HREF=&quot;)?" + http_url + "(?: target=&quot;_blank&quot;&gt;)?",
+            "(?:&lt;A HREF=&quot;)?" + _URL_PATTERN + "(?: target=&quot;_blank&quot;&gt;)?",
             lambda p: str(
                 html.render_icon_button(
-                    _prepare_button_url(p),
-                    _prepare_button_url(p),
-                    "link",
+                    _prepare_button_url(p), _prepare_button_url(p), "link", target="_blank"
                 )
             ),
             output,

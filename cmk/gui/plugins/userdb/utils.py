@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -12,8 +12,10 @@ from livestatus import SiteId
 
 import cmk.utils.plugin_registry
 import cmk.utils.store as store
+from cmk.utils.crypto.password import Password
 from cmk.utils.site import omd_site
 from cmk.utils.type_defs import UserId
+from cmk.utils.urls import is_allowed_url
 
 from cmk.gui.config import builtin_role_ids
 from cmk.gui.exceptions import MKUserError
@@ -22,7 +24,6 @@ from cmk.gui.hooks import request_memoize
 from cmk.gui.i18n import _
 from cmk.gui.sites import get_site_config, is_wato_slave_site, site_is_local
 from cmk.gui.type_defs import UserSpec
-from cmk.gui.utils import is_allowed_url
 from cmk.gui.utils.logged_in import LoggedInUser, save_user_file
 
 # count this up, if new user attributes are used or old are marked as
@@ -354,7 +355,7 @@ class UserConnector(abc.ABC):
     #     False       -> Login failed
     #     None        -> Unknown user
     @abc.abstractmethod
-    def check_credentials(self, user_id, password) -> CheckCredentialsResult:
+    def check_credentials(self, user_id: UserId, password: Password) -> CheckCredentialsResult:
         return None
 
     # Optional: Hook function can be registered here to be executed

@@ -1,4 +1,4 @@
-// Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+// Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 // This file is part of Checkmk (https://checkmk.com). It is subject to the
 // terms and conditions defined in the file COPYING, which is part of this
 // source code package.
@@ -46,6 +46,8 @@ void RendererPython3::separateDictKeyValue() { _os << ":"; }
 void RendererPython3::endDict() { _os << "}"; }
 
 // --------------------------------------------------------------------------
+
+bool RendererPython3::useSurrogatePairs() const { return false; };
 
 void RendererPython3::outputNull() { _os << "None"; }
 

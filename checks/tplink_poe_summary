@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -13,7 +13,7 @@ def inventory_tplink_poe_summary(info):
 def check_tplink_poe_summary(_no_item, params, info):
     deci_watt = float(info[0][0])
     watt = deci_watt / 10
-    return check_levels(watt, "power", params, unit="Watt")
+    return check_levels(watt, "power", params.get("levels", (None, None)), unit="Watt")
 
 
 check_info["tplink_poe_summary"] = {

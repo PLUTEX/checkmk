@@ -1,4 +1,4 @@
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 #
@@ -13667,7 +13667,7 @@ msgid "Deploy the SAP router plugin"
 msgstr "Das SAP-Router-Plugin ausrollen"
 
 msgid "Deploy the SSH daemon configuration plugin"
-msgstr "Das SSH Daemon Konfigurationsplugin nicht ausrollen"
+msgstr "Das SSH Daemon Konfigurationsplugin ausrollen"
 
 msgid "Deploy the TSM plugin"
 msgstr "Das TSM Plugin ausrollen"
@@ -30305,7 +30305,7 @@ msgid "Monitoring agents"
 msgstr "Monitoringagent"
 
 msgid "Monitoring core"
-msgstr "Monitorign-Kern"
+msgstr "Monitoring-Kern"
 
 msgid "Monitoring history entries (events and availability)"
 msgstr "Monitoring-Historie (Ereignisse und Verfügbarkeit)"
@@ -40595,7 +40595,7 @@ msgid "Set absolute levels"
 msgstr "Setze absolute Schwellwerte"
 
 msgid "Set an individual idle timeout"
-msgstr "Einen indiviellen Timeout festlegen"
+msgstr "Einen individuellen Timeout festlegen"
 
 msgid "Set as start URL"
 msgstr "Als Start-URL einstellen"

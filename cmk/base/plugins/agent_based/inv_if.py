@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -56,6 +56,9 @@ def _process_sub_table(sub_table: Sequence[Union[str, Sequence[int]]]) -> Iterab
     >>> pprint(list(_process_sub_table(['49160', 'gigabitEthernet 1/0/8', 'pve-muc1-ipmi', '6',
     ... '1000000000', '1000', '1', '1', [116, 218, 136, 88, 22, 17], ''])))
     []
+    >>> pprint(list(_process_sub_table(["NULL", "NULL", "", "NULL", "NULL", "", "NULL", "NULL",
+    ... [78, 85, 76, 76], "NULL"]))) # innovaphone IP811
+    []
     """
     index, descr, alias, type_, speed, high_speed, oper_status, admin_status = (
         str(x) for x in sub_table[:-2]
@@ -64,7 +67,7 @@ def _process_sub_table(sub_table: Sequence[Union[str, Sequence[int]]]) -> Iterab
 
     # Ignore useless entries for "TenGigabitEthernet2/1/21--Uncontrolled" (type) or half-empty
     # tables (e.g. Viprinet-Router)
-    if type_ in ("231", "232") or not last_change or not speed:
+    if type_ in ("231", "232") or last_change in ("", "NULL") or not speed:
         return
 
     yield Interface(

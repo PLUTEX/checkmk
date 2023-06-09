@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """WATO LIBRARY
@@ -130,6 +130,7 @@ from cmk.gui.watolib.automations import (
     local_automation_failure,
     MKAutomationException,
     remote_automation_call_came_from_pre21,
+    remote_automation_caller_version,
 )
 from cmk.gui.watolib.changes import add_change, add_service_change, log_audit, make_diff_text
 from cmk.gui.watolib.config_domains import (

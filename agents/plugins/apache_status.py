@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
-__version__ = "2.1.0p16"
+__version__ = "2.1.0p29"
 
 # Checkmk-Agent-Plugin - Apache Server Status
 #
@@ -23,6 +23,7 @@ __version__ = "2.1.0p16"
 # It is also possible to override or extend the ssl_ports variable to make the
 # check contact other ports than 443 with HTTPS requests.
 
+import contextlib
 import os
 import re
 import sys
@@ -126,10 +127,10 @@ def try_detect_servers(ssl_ports):
         # the pid/proc field length is limited to 19 chars. Thus in case of
         # long PIDs, the process names are stripped of by that length.
         # Workaround this problem here
-        procs = [p[: 19 - len(pid) - 1] for p in procs]
+        stripped_procs = [p[: 19 - len(pid) - 1] for p in procs]
 
         # Skip unwanted processes
-        if proc not in procs:
+        if proc not in stripped_procs:
             continue
 
         scheme, server_address, server_port = parse_address_and_port(parts[3], ssl_ports)
@@ -263,10 +264,11 @@ def get_instance_name_map(cfg):
         for line in os.popen("omd sites").readlines():
             sitename = line.split()[0]
             path = "/opt/omd/sites/%s/etc/apache/listen-port.conf" % sitename
-            with open(path) as site_cfg_handle:
-                site_raw_conf = site_cfg_handle.readlines()
+            instance_name_map.setdefault("omd_sites", {})
+            with contextlib.suppress(PermissionError, FileNotFoundError):
+                with open(path) as site_cfg_handle:
+                    site_raw_conf = site_cfg_handle.readlines()
                 site_conf = site_raw_conf[-2].strip().split()[1]
-                instance_name_map.setdefault("omd_sites", {})
                 instance_name_map["omd_sites"][site_conf] = sitename
     return instance_name_map
 

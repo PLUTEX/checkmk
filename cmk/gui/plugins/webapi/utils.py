@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Module to hold shared code for module internals and the plugins"""
@@ -21,7 +21,7 @@ from cmk.gui.exceptions import MKUserError
 from cmk.gui.globals import config
 from cmk.gui.i18n import _
 from cmk.gui.log import logger
-from cmk.gui.sites import allsites
+from cmk.gui.sites import get_enabled_sites
 from cmk.gui.type_defs import PermissionName
 from cmk.gui.valuespec import Hostname
 from cmk.gui.watolib.host_attributes import ABCHostAttribute, host_attribute_registry
@@ -138,7 +138,7 @@ def _validate_general_host_attributes(host_attributes, new):
                 attr.validate_input(value, "")
 
         # The site attribute gets an extra check
-        if name == "site" and value not in allsites().keys():
+        if name == "site" and value not in get_enabled_sites().keys():
             raise MKUserError(None, _("Unknown site %s") % escaping.escape_attribute(value))
 
 

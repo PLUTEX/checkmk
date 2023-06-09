@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 
+from collections.abc import Iterable, Mapping
+
 import cmk.gui.mkeventd as mkeventd
+from cmk.gui.exceptions import MKUserError
 from cmk.gui.i18n import _
 from cmk.gui.plugins.wato.active_checks import RulespecGroupActiveChecks
 from cmk.gui.plugins.wato.utils import HostRulespec, IndividualOrStoredPassword, rulespec_registry
@@ -14,6 +17,7 @@ from cmk.gui.valuespec import (
     CascadingDropdown,
     Checkbox,
     Dictionary,
+    DictionaryEntry,
     DropdownChoice,
     EmailAddress,
     FixedValue,
@@ -27,20 +31,61 @@ from cmk.gui.valuespec import (
 )
 
 
-def _common_email_parameters(protocol, port_defaults):
+def _common_email_parameters(protocol: str, port_defaults: str) -> Dictionary:
+    credentials_basic: tuple[str, str, Tuple] = (
+        "basic",
+        _("Username/Password"),
+        Tuple(
+            title=_("Authentication"),
+            elements=[
+                TextInput(title=_("Username"), allow_empty=False),
+                IndividualOrStoredPassword(title=_("Password"), allow_empty=False, size=12),
+            ],
+        ),
+    )
+    credentials_oauth2: tuple[str, str, Tuple] = (
+        "oauth2",
+        _("OAuth2 (ClientID/TenantID)"),
+        Tuple(
+            title=_("Authentication"),
+            elements=[
+                TextInput(title=_("ClientID"), allow_empty=False),
+                IndividualOrStoredPassword(title=_("Client Secret"), allow_empty=False, size=12),
+                TextInput(title=_("TenantID"), allow_empty=False),
+            ],
+        ),
+    )
+
     return Dictionary(
         title=protocol,
         optional_keys=["server", "email_address"],
         elements=[
             (
                 "server",
-                HostAddress(
+                Alternative(
                     title=f"{protocol} Server",
-                    allow_empty=False,
-                    help=_(
-                        "You can specify a hostname or IP address different from the IP address "
-                        "of the host this check will be assigned to."
-                    ),
+                    elements=[
+                        FixedValue(
+                            value="$HOSTADDRESS$",
+                            title=_(
+                                "Use the address of the host for which the service is generated"
+                            ),
+                            totext="",
+                        ),
+                        FixedValue(
+                            value="$HOSTNAME$",
+                            title=_("Use the name of the host for which the service is generated"),
+                            totext="",
+                        ),
+                        HostAddress(
+                            title=f"{protocol} Server",
+                            allow_empty=False,
+                            help=_(
+                                "You can specify a hostname or IP address different from the IP "
+                                "address of the host this check will be assigned to."
+                            ),
+                        ),
+                    ],
                 ),
             ),
             (
@@ -75,12 +120,10 @@ def _common_email_parameters(protocol, port_defaults):
             ),
             (
                 "auth",
-                Tuple(
-                    title=_("Authentication"),
-                    elements=[
-                        TextInput(title=_("Username"), allow_empty=False),
-                        IndividualOrStoredPassword(title=_("Password"), allow_empty=False, size=12),
-                    ],
+                CascadingDropdown(
+                    title=_("Authentication types"),
+                    choices=[credentials_basic]
+                    + ([credentials_oauth2] if protocol == "EWS" else []),
                 ),
             ),
         ]
@@ -103,10 +146,20 @@ def _common_email_parameters(protocol, port_defaults):
             if protocol == "EWS"
             else []
         ),  # type: ignore[arg-type]
+        validate=validate_common_email_parameters,
     )
 
 
-def _mail_receiving_params(supported_protocols):
+def validate_common_email_parameters(params: Mapping[str, tuple], varprefix: str) -> None:
+    if params["auth"][0] == "oauth2" and "email_address" not in params:
+        raise MKUserError(
+            varprefix,
+            "With authentication type set to 'OAuth2' an 'Email address used for"
+            " account identification' must be specified.",
+        )
+
+
+def _mail_receiving_params(supported_protocols: Iterable[str]) -> DictionaryEntry:
     return (
         "fetch",
         CascadingDropdown(
@@ -133,57 +186,55 @@ def apply_fetch(params, fetch_param, allowed_keys):
     }
 
 
+def is_typed_auth(auth: tuple[str, tuple]) -> bool:
+    """New `auth` elements contain a type ('basic' or 'oauth2') as first element
+    and a 2/3 tuple as second element containing the actual auth data, e.g.
+    `(<type>:str, (<username>:str, (<pw-type>:str, <pw-or-id>:str)))`
+     while older variants only consisted of
+    a 2-tuple `(<username>:str, (<pw-type>:str, <pw-or-id>:str))`
+    So checking the type of the second elment of the second element to be a
+    tuple tells us if the given @auth is new.
+    """
+    return isinstance(auth[1][1], tuple)
+
+
+def update_auth(auth: tuple[str, tuple]) -> tuple[str, tuple[str, ...]]:
+    """Older `auth` element had been `basic` only, so we just have to wrap it
+    if it's not typed yet"""
+    return auth if is_typed_auth(auth) else ("basic", auth)
+
+
 def update_fetch(old_fetch):
-    """Create a new 'fetch' element out of an old one"""
+    """Create a new 'fetch' element out of an old one.
+    Older `fetch` structures might have contained an `ssl` element with a tuple
+    (use_ssl: optional[bool], tcp_port: optional[str]), which is being semantially
+    inverted and merged into the new `connection` elment:
+    "connection": {
+        "disable_tls": not <prior-value>  # only if prior-value was not None
+        "tcp_port": <prior-value>  # only if prior-value was not None
+    }
+    The `auth` element had been a tuple `(<username>, (<pw-type>, <pw-or-id>))`
+    and contains a type now, which is being inserted by `update_auth()`
+    """
     return {
-        "server": old_fetch["server"],
+        "server": old_fetch.get("server"),
         "connection": {
-            k: (not v) if isinstance(v, bool) else v
-            for k, v in zip(("disable_tls", "tcp_port"), old_fetch["ssl"])
-            if v is not None
+            **{
+                k: (not v) if isinstance(v, bool) else v
+                for k, v in zip(("disable_tls", "tcp_port"), old_fetch.get("ssl", (None, None)))
+                if v is not None
+            },
+            **old_fetch.get("connection", {}),
         },
-        "auth": old_fetch["auth"],
+        "auth": update_auth(old_fetch["auth"]),
     }
 
 
 def transform_check_mail_loop_params(params):
-    """Transforms rule sets from 2.0 and below format to current (2.1 and up)
-    >>> transformed = transform_check_mail_loop_params({  # v2.0.0 / IMAP
-    ...     'item': 'SD',
-    ...     'fetch': ('IMAP', {
-    ...       'server': 'srv',
-    ...       'ssl': (False, 143),
-    ...       'auth': ('usr_imap', ('password', 'pw_imap')),
-    ...     }),
-    ...     'connect_timeout': 23,
-    ...     'subject': 'Some subject',
-    ...     'smtp_server': 'smtp.gmx.de',
-    ...     'smtp_tls': True,
-    ...     'imap_tls': True,
-    ...     'smtp_port': 25,
-    ...     'smtp_auth': ('usr_smtp', ('password', 'pw_smtp')),
-    ...     'mail_from': 'me_from@gmx.de',
-    ...     'mail_to': 'me_to@gmx.de',
-    ...     'duration': (93780, 183840),
-    ... })
-    >>> assert transform_check_mail_loop_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
-    connect_timeout: 23
-    duration: (93780, 183840)
-    fetch: ('IMAP', {'server': 'srv', 'connection': {'disable_tls': False, 'tcp_port': 143}, 'auth': ('usr_imap', ('password', 'pw_imap'))})
-    item: SD
-    mail_from: me_from@gmx.de
-    mail_to: me_to@gmx.de
-    smtp_auth: ('usr_smtp', ('password', 'pw_smtp'))
-    smtp_port: 25
-    smtp_server: smtp.gmx.de
-    smtp_tls: True
-    subject: Some subject
-    """
+    """Transforms rule sets from 2.0 and below format to current (2.1 and up)"""
     allowed_keys = {
         "item",  # instead of "service_description"
-        "fetch",
+        "fetch",  # can be asserted - since v2.0.0
         "connect_timeout",
         "subject",
         "smtp_server",
@@ -195,25 +246,30 @@ def transform_check_mail_loop_params(params):
         "duration",
         "delete_messages",
     }
-    if not params.keys() <= allowed_keys | {"imap_tls"}:
-        raise ValueError(f"{params.keys() - allowed_keys}")
+    fetch_protocol, fetch_params = params["fetch"]
 
-    if "fetch" in params:
-        fetch_protocol, fetch_params = params["fetch"]
-        if fetch_protocol in {"IMAP", "POP3"} and {"connection", "auth"} <= fetch_params.keys():
-            # newest schema (2.1 and up) - do nothing
-            return params
-        if fetch_protocol in {"IMAP", "POP3"} and {"server", "ssl", "auth"} <= fetch_params.keys():
-            # old format (2.0 and below)
-            if params.get("imap_tls"):
-                fetch_params["ssl"] = (True, fetch_params["ssl"][1])
-            return apply_fetch(
-                params,
-                (fetch_protocol, update_fetch(fetch_params)),
-                allowed_keys,
-            )
+    # since v2.0.0 `fetch_protocol` is one of {"IMAP", "POP3"}
+    # - but cannot be "EWS" for check_mail_loop yet
 
-    raise ValueError(f"Cannot transform {params}")
+    # `connection` is part of `fetch_params` since v2.1.0
+    if "connection" in fetch_params:
+        if not is_typed_auth(fetch_params["auth"]):
+            # Up to 2.1.0p24 we only had the basic auth tuple
+            return {
+                **params,
+                "fetch": (fetch_protocol, update_fetch(fetch_params)),
+            }
+        # newest schema (2.1 and up) - return the unmodified argument
+        return params
+
+    # old format (2.0 and below)
+    if params.get("imap_tls"):
+        fetch_params["ssl"] = (True, fetch_params["ssl"][1])
+    return apply_fetch(
+        params,
+        (fetch_protocol, update_fetch(fetch_params)),
+        allowed_keys,
+    )
 
 
 def _valuespec_active_checks_mail_loop():
@@ -371,11 +427,23 @@ def transform_check_mail_params(params):
     ...     'forward': {'match_subject': 'test'},
     ... })
     >>> assert transform_check_mail_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
+    >>> import yaml; print(yaml.dump(transformed).strip())
     connect_timeout: 12
-    fetch: ('IMAP', {'server': 'srv', 'connection': {'disable_tls': True, 'tcp_port': 143}, 'auth': ('usr', ('password', 'pw'))})
-    forward: {'match_subject': 'test'}
+    fetch: !!python/tuple
+    - IMAP
+    - auth: !!python/tuple
+      - basic
+      - !!python/tuple
+        - usr
+        - !!python/tuple
+          - password
+          - pw
+      connection:
+        disable_tls: true
+        tcp_port: 143
+      server: srv
+    forward:
+      match_subject: test
     service_description: SD
     >>> transformed = transform_check_mail_params({  # v2.0.0 / POP3
     ...     'service_description': 'SD',
@@ -388,11 +456,23 @@ def transform_check_mail_params(params):
     ...     'forward': {'match_subject': 'test'},
     ... })
     >>> assert transform_check_mail_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
+    >>> import yaml; print(yaml.dump(transformed).strip())
     connect_timeout: 12
-    fetch: ('POP3', {'server': 'srv', 'connection': {'disable_tls': True, 'tcp_port': 110}, 'auth': ('usr', ('password', 'pw'))})
-    forward: {'match_subject': 'test'}
+    fetch: !!python/tuple
+    - POP3
+    - auth: !!python/tuple
+      - basic
+      - !!python/tuple
+        - usr
+        - !!python/tuple
+          - password
+          - pw
+      connection:
+        disable_tls: true
+        tcp_port: 110
+      server: srv
+    forward:
+      match_subject: test
     service_description: SD
     """
 
@@ -404,21 +484,28 @@ def transform_check_mail_params(params):
     }:
         raise ValueError(f"{params.keys()}")
 
-    if "fetch" in params:
-        fetch_protocol, fetch_params = params["fetch"]
-        if (
-            fetch_protocol in {"IMAP", "POP3", "EWS"}
-            and {"connection", "auth"} <= fetch_params.keys()
-        ):
-            # newest schema (2.1 and up) - do nothing
-            return params
-        if fetch_protocol in {"IMAP", "POP3"} and {"server", "ssl", "auth"} <= fetch_params.keys():
-            # old format (2.0 and below)
-            return apply_fetch(
-                params,
-                (fetch_protocol, update_fetch(fetch_params)),
-                {"service_description", "forward", "connect_timeout"},
-            )
+    fetch_protocol, fetch_params = params["fetch"]
+
+    # since v2.0.0 `fetch_protocol` is one of {"IMAP", "POP3"}
+    # - but cannot be "EWS" for check_mail yet
+
+    if "connection" in fetch_params:
+        if not is_typed_auth(fetch_params["auth"]):
+            # Up to 2.1.0p24 we only had the basic auth tuple
+            return {
+                **params,
+                "fetch": (fetch_protocol, update_fetch(fetch_params)),
+            }
+        # newest schema (2.1 and up) - do nothing
+        return params
+
+    if {"ssl", "auth"} <= fetch_params.keys():
+        # old format (2.0 and below)
+        return apply_fetch(
+            params,
+            (fetch_protocol, update_fetch(fetch_params)),
+            {"service_description", "forward", "connect_timeout"},
+        )
 
     raise ValueError(f"Cannot transform {params}")
 
@@ -659,13 +746,32 @@ def transform_check_mailbox_params(params):
     ...     'mailboxes': ['abc', 'def'],
     ... })
     >>> assert transform_check_mailbox_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
-    age: (1, 2)
-    age_newest: (3, 4)
-    count: (5, 6)
-    fetch: ('IMAP', {'server': 'srv', 'connection': {'disable_tls': False, 'tcp_port': 7}, 'auth': ('usr', ('password', 'pw'))})
-    mailboxes: ['abc', 'def']
+    >>> import yaml; print(yaml.dump(transformed).strip())
+    age: !!python/tuple
+    - 1
+    - 2
+    age_newest: !!python/tuple
+    - 3
+    - 4
+    count: !!python/tuple
+    - 5
+    - 6
+    fetch: !!python/tuple
+    - IMAP
+    - auth: !!python/tuple
+      - basic
+      - !!python/tuple
+        - usr
+        - !!python/tuple
+          - password
+          - pw
+      connection:
+        disable_tls: false
+        tcp_port: 7
+      server: srv
+    mailboxes:
+    - abc
+    - def
     service_description: SD
     >>> transformed = transform_check_mailbox_params({  # v2.1.0b / IMAP
     ...     'service_description': 'SD',
@@ -676,14 +782,32 @@ def transform_check_mailbox_params(params):
     ...     'connect_timeout': 12,
     ... })
     >>> assert transform_check_mailbox_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
-    age: (1, 2)
-    age_newest: (3, 4)
+    >>> import yaml; print(yaml.dump(transformed).strip())
+    age: !!python/tuple
+    - 1
+    - 2
+    age_newest: !!python/tuple
+    - 3
+    - 4
     connect_timeout: 12
-    count: (5, 6)
-    fetch: ('IMAP', {'server': 'srv', 'connection': {'disable_tls': False}, 'auth': ('usr', ('password', 'pw'))})
-    mailboxes: ['abc', 'def']
+    count: !!python/tuple
+    - 5
+    - 6
+    fetch: !!python/tuple
+    - IMAP
+    - auth: !!python/tuple
+      - basic
+      - !!python/tuple
+        - usr
+        - !!python/tuple
+          - password
+          - pw
+      connection:
+        disable_tls: false
+      server: srv
+    mailboxes:
+    - abc
+    - def
     service_description: SD
     >>> transformed = transform_check_mailbox_params({  # v2.1.0 / EWS
     ...     'service_description': 'SD',
@@ -695,13 +819,33 @@ def transform_check_mailbox_params(params):
     ...     'mailboxes': ['abc', 'def'],
     ... })
     >>> assert transform_check_mailbox_params(transformed) == transformed
-    >>> for k, v in sorted(transformed.items()):
-    ...   print(f"{k}: {v}")
-    age: (1, 2)
-    age_newest: (3, 4)
-    count: (5, 6)
-    fetch: ('EWS', {'server': 'srv', 'connection': {'disable_tls': False, 'disable_cert_validation': False, 'tcp_port': 123}, 'auth': ('usr', ('password', 'pw'))})
-    mailboxes: ['abc', 'def']
+    >>> import yaml; print(yaml.dump(transformed).strip())
+    age: !!python/tuple
+    - 1
+    - 2
+    age_newest: !!python/tuple
+    - 3
+    - 4
+    count: !!python/tuple
+    - 5
+    - 6
+    fetch: !!python/tuple
+    - EWS
+    - auth: !!python/tuple
+      - basic
+      - !!python/tuple
+        - usr
+        - !!python/tuple
+          - password
+          - pw
+      connection:
+        disable_cert_validation: false
+        disable_tls: false
+        tcp_port: 123
+      server: srv
+    mailboxes:
+    - abc
+    - def
     service_description: SD
     """
     allowed_keys = {
@@ -718,8 +862,14 @@ def transform_check_mailbox_params(params):
     if "fetch" in params:
         fetch_protocol, fetch_params = params["fetch"]
         if fetch_protocol in {"IMAP", "EWS"} and {"connection", "auth"} <= fetch_params.keys():
-            # newest schema (2.1 and up) - do nothing
-            return params
+            if is_typed_auth(fetch_params["auth"]):
+                # newest schema (2.1 and up) - do nothing
+                return params
+            # Up to 2.1.0p24 we only had the basic auth tuple
+            return {
+                **params,
+                "fetch": (fetch_protocol, update_fetch(fetch_params)),
+            }
         if fetch_protocol in {"IMAP"} and {"server", "ssl", "auth"} <= fetch_params.keys():
             # temporary 2.1.0b format - just update the connection element
             return apply_fetch(params, ("IMAP", update_fetch(fetch_params)), allowed_keys)

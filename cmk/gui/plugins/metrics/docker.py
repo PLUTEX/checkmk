@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -89,7 +89,7 @@ metric_info["docker_reclaimable"] = {
 #   '----------------------------------------------------------------------'
 
 graph_info["docker_containers"] = {
-    "title": _("Docker Containers"),
+    "title": _("Docker containers"),
     "metrics": [
         ("docker_running_containers", "area"),
         ("docker_paused_containers", "stack"),
@@ -99,7 +99,7 @@ graph_info["docker_containers"] = {
 }
 
 graph_info["docker_df"] = {
-    "title": _("Docker Disk Usage"),
+    "title": _("Disk usage"),
     "metrics": [
         ("docker_size", "area"),
         ("docker_reclaimable", "area"),
@@ -107,7 +107,7 @@ graph_info["docker_df"] = {
 }
 
 graph_info["docker_df_count"] = {
-    "title": _("Docker Disk Usage Count"),
+    "title": _("Number of objects"),
     "metrics": [
         ("docker_count", "area"),
         ("docker_active", "area"),

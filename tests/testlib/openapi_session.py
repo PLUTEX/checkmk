@@ -1,10 +1,43 @@
 import logging
 import time
-from typing import Any, List, NamedTuple, NoReturn, Optional
+from collections.abc import Mapping
+from typing import Any, AnyStr, List, NamedTuple, NoReturn, Optional
 
 import requests
 
+from tests.testlib.rest_api_client import RequestHandler, Response
+
 logger = logging.getLogger("rest-session")
+
+
+class RequestSessionRequestHandler(RequestHandler):
+    def __init__(self):
+        self.session = requests.session()
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        query_params: Optional[Mapping[str, str]] = None,
+        body: Optional[AnyStr] = None,
+        headers: Optional[Mapping[str, str]] = None,
+    ) -> Response:
+        if headers is not None:
+            actual_headers = dict(headers)
+        else:
+            actual_headers = {}
+        resp = self.session.request(
+            method=method,
+            url=url,
+            params=query_params,
+            data=body,
+            headers=actual_headers,
+            allow_redirects=False,
+        )
+        return Response(status_code=resp.status_code, body=resp.text.encode(), headers=resp.headers)
+
+    def set_credentials(self, username: str, password: str) -> None:
+        self.session.headers["Authorization"] = f"Bearer {username} {password}"
 
 
 class RestSessionException(Exception):
@@ -66,7 +99,9 @@ class CMKOpenApiSession(requests.Session):
         Suggested method to use a base url with a requests.Session
         see https://github.com/psf/requests/issues/2554#issuecomment-109341010
         """
-        url = f"http://{self.host}:{self.port}/{self.site}/check_mk/api/{self.api_version}/{url.strip('/')}"
+
+        if not url.startswith("http://"):
+            url = f"http://{self.host}:{self.port}/{self.site}/check_mk/api/{self.api_version}/{url.strip('/')}"
 
         logger.debug("> [%s] %s (%s, %s)", method, url, args, kwargs)
         response = super().request(method, url, *args, **kwargs)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import abc
 import time
-from functools import partial
+from functools import partial, total_ordering
 from typing import (
     Any,
     Callable,
     Dict,
+    Final,
     Iterable,
     List,
     Mapping,
@@ -34,6 +35,7 @@ from cmk.utils.structured_data import (
     SDKeys,
     SDPath,
     SDRawPath,
+    SDValue,
     StructuredDataNode,
     Table,
 )
@@ -167,8 +169,8 @@ def _paint_host_inventory_tree(
             # In host views like "Switch port statistics" the value is rendered as a single
             # attribute and not within a table.
             if len(attributes := list(child.pairs.items())) == 1:
-                key, value = attributes[-1]
-                tree_renderer.show_attribute(value, _get_display_hint("%s.%s" % (invpath, key)))
+                _key, value = attributes[-1]
+                tree_renderer.show_attribute(value, _get_display_hint(invpath))
         else:
             child.show(tree_renderer)
 
@@ -1876,6 +1878,7 @@ def _sort_by_index(keyorder, item):
 
 
 TableTitles = List[Tuple[str, str, bool]]
+_GRAY: Final[str] = "#777"
 
 
 class ABCNodeRenderer(abc.ABC):
@@ -1908,7 +1911,7 @@ class ABCNodeRenderer(abc.ABC):
         if "%d" in title or "%s" in title:
             title = self._replace_placeholders(title, invpath)
 
-        header = self._get_header(title, ".".join(map(str, node.path)), "#666")
+        header = self._get_header(title, ".".join(map(str, node.path)))
         fetch_url = makeuri_contextless(
             request,
             [
@@ -2003,11 +2006,24 @@ class ABCNodeRenderer(abc.ABC):
         html.open_table(class_="data")
         html.open_tr()
         for title, key, is_key_column in titles:
-            html.th(self._get_header(title, key, "#DDD", is_key_column=is_key_column))
+            html.th(self._get_header(title, "%s*" % key if is_key_column else key))
 
         html.close_tr()
 
+        def _empty_or_equal(value: tuple[SDValue | None, SDValue | None] | SDValue | None) -> bool:
+            # Some refactorings broke werk 6821. Especially delta trees may contain empty or
+            # unchanged rows.
+            if value is None:
+                return True
+            if isinstance(value, tuple) and len(value) == 2 and value[0] == value[1]:
+                # Only applies to delta tree
+                return True
+            return False
+
         for index, entry in enumerate(self._sort_table_rows(hint, table)):
+            if all(_empty_or_equal(entry.get(key)) for _title, key, _is_key_column in titles):
+                continue
+
             html.open_tr(class_="even0")
             for title, key, _is_key_column in titles:
                 value = entry.get(key)
@@ -2033,11 +2049,45 @@ class ABCNodeRenderer(abc.ABC):
         html.close_table()
 
     def _sort_table_rows(self, hint: InventoryHintSpec, table: Table) -> inventory.InventoryRows:
-        if (keyorder := hint.get("keyorder")) is None:
+        keyorder: Optional[List[str]] = hint.get("keyorder")
+        if keyorder is None:
             return table.rows
 
-        sorting_keys = tuple(k for k in keyorder if k in table.key_columns)
-        return sorted(table.rows, key=lambda r: tuple(r.get(k) or "" for k in sorting_keys))
+        sorting_keys: Tuple[str, ...] = tuple(k for k in keyorder if k in table.key_columns)
+
+        # The sorting of rows is overly complicated here, because of the type SDValue = Any and
+        # because the given values can be from both an inventory tree or from a delta tree.
+        # Therefore, values may also be tuples of old and new value (delta tree), see _compare_dicts
+        # in cmk.utils.structured_data.
+        @total_ordering
+        class _MinType:
+            def __le__(self, other: object) -> bool:
+                return True
+
+            def __eq__(self, other: object) -> bool:
+                return self is other
+
+        min_type = _MinType()
+
+        def _sanitize_value_for_sorting(
+            value: SDValue,
+        ) -> _MinType | SDValue | tuple[_MinType | SDValue, _MinType | SDValue]:
+            # Replace None values with min_type to enable comparison for type SDValue, i.e. Any.
+            if value is None:
+                return min_type
+
+            if isinstance(value, tuple):
+                return (
+                    min_type if value[0] is None else value[0],
+                    min_type if value[1] is None else value[1],
+                )
+
+            return value
+
+        return sorted(
+            table.rows,
+            key=lambda r: tuple(_sanitize_value_for_sorting(r.get(k)) for k in sorting_keys),
+        )
 
     @abc.abstractmethod
     def _show_table_value(
@@ -2071,7 +2121,7 @@ class ABCNodeRenderer(abc.ABC):
             hint = _get_display_hint(sub_invpath)
 
             html.open_tr()
-            html.th(self._get_header(title, key, "#DDD"), title=sub_invpath)
+            html.th(self._get_header(title, key), title=sub_invpath)
             html.open_td()
             self.show_attribute(
                 value,
@@ -2097,18 +2147,10 @@ class ABCNodeRenderer(abc.ABC):
         raw_path = ".".join(map(str, path)) if path else self._invpath
         return raw_path.strip(".")
 
-    def _get_header(
-        self,
-        title: str,
-        key: str,
-        hex_color: str,
-        *,
-        is_key_column: bool = False,
-    ) -> HTML:
+    def _get_header(self, title: str, key_info: str) -> HTML:
         header = HTML(title)
         if self._show_internal_tree_paths:
-            key_info = "%s*" % key if is_key_column else key
-            header += " " + html.render_span("(%s)" % key_info, style="color: %s" % hex_color)
+            header += " " + html.render_span("(%s)" % key_info, style=f"color: {_GRAY}")
         return header
 
     def _show_child_value(
@@ -2117,41 +2159,37 @@ class ABCNodeRenderer(abc.ABC):
         hint: InventoryHintSpec,
         retention_intervals: Optional[RetentionIntervals] = None,
     ) -> None:
+        if value is None:
+            html.write_text("")
+            return
+
         if "paint_function" in hint:
             paint_function: PaintFunction = hint["paint_function"]
-            _tdclass, code = paint_function(value)
-            html.write_text(code)
-        elif isinstance(value, str):
-            html.write_text(value)
+            _tdclass, value = paint_function(value)
         elif isinstance(value, int):
-            html.write_text(str(value))
+            value = str(value)
         elif isinstance(value, float):
-            html.write_text("%.2f" % value)
+            value = "%.2f" % value
         elif isinstance(value, HTML):
-            html.write_html(value)
+            value = value.value
         elif value is not None:
-            html.write_text(str(value))
+            value = str(value)
 
-        if (ret_value_to_write := self._get_retention_value(retention_intervals)) is not None:
-            html.write_html(ret_value_to_write)
+        if not isinstance(value, HTML):
+            value = HTML(value)
 
-    def _get_retention_value(
+        if self._is_outdated(retention_intervals):
+            html.write_html(html.render_span(value.value, style=f"color: {_GRAY}"))
+        else:
+            html.write_html(value)
+
+    def _is_outdated(
         self,
         retention_intervals: Optional[RetentionIntervals],
-    ) -> Optional[HTML]:
-        if retention_intervals is None:
-            return None
-
-        now = time.time()
-
-        if now <= retention_intervals.valid_until:
-            return None
-
-        if now <= retention_intervals.keep_until:
-            _tdclass, value = inv_paint_age(retention_intervals.keep_until - now)
-            return html.render_span(_(" (%s left)") % value, style="color: #DDD")
-
-        return html.render_span(_(" (outdated)"), style="color: darkred")
+    ) -> bool:
+        return (
+            False if retention_intervals is None else time.time() > retention_intervals.keep_until
+        )
 
 
 class NodeRenderer(ABCNodeRenderer):

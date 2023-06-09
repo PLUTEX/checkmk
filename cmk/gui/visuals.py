@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -94,6 +94,7 @@ from cmk.gui.type_defs import (
     VisualTypeName,
 )
 from cmk.gui.utils import unique_default_name_suggestion, validate_id
+from cmk.gui.utils.csrf_token import check_csrf_token
 from cmk.gui.utils.flashed_messages import flash, get_flashed_messages
 from cmk.gui.utils.html import HTML
 from cmk.gui.utils.logged_in import save_user_file
@@ -619,6 +620,7 @@ def available(
             n not in visuals
             and published_to_user(visual)
             and user_may(u, "general.force_" + what)
+            and user.may("general.see_user_" + what)
             and not restricted_visual(n)
         ):
             visuals[n] = visual
@@ -1429,7 +1431,7 @@ def page_edit_visual(
             for key, _value in visibility_elements:
                 visual[key] = general_properties["visibility"].get(key, False)
 
-            if not user.may("general.publish_" + what):
+            if not is_user_with_publish_permissions("visual", user.id, what):
                 visual["public"] = False
 
             if create_handler:
@@ -2408,8 +2410,12 @@ def set_page_context(page_context: VisualContext) -> None:
 
 @cmk.gui.pages.register("ajax_add_visual")
 def ajax_add_visual() -> None:
+    check_csrf_token()
     visual_type_name = request.get_str_input_mandatory("visual_type")  # dashboards / views / ...
-    visual_type = visual_type_registry[visual_type_name]()
+    try:
+        visual_type = visual_type_registry[visual_type_name]()
+    except KeyError:
+        raise MKUserError("visual_type", _("Invalid visual type"))
 
     visual_name = request.get_str_input_mandatory("visual_name")  # add to this visual
 

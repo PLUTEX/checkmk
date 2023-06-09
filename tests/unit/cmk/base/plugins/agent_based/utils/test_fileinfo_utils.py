@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -324,7 +324,7 @@ def test__filename_matches(filename, reftime, inclusion, exclusion, expected_res
 @pytest.mark.parametrize(
     "item, params, parsed, expected_result",
     [
-        (
+        pytest.param(
             "my_folder/filename123",
             {"group_patterns": [("~my_folder/file.*", "")]},
             Fileinfo(
@@ -365,8 +365,9 @@ def test__filename_matches(filename, reftime, inclusion, exclusion, expected_res
                 Result(state=State.OK, summary="Newest age: 3 years 41 days"),
                 Metric("age_newest", 98209582),
             ],
+            id="missing file",
         ),
-        (
+        pytest.param(
             "my_folder/filename123",
             {"group_patterns": [("~my_folder/file.*", "")]},
             Fileinfo(
@@ -408,6 +409,7 @@ def test__filename_matches(filename, reftime, inclusion, exclusion, expected_res
                 Result(state=State.OK, summary="Newest age: 3 years 41 days"),
                 Metric("age_newest", 98209582),
             ],
+            id="failed file",
         ),
         pytest.param(
             "my_folder/*.dat",
@@ -437,6 +439,89 @@ def test__filename_matches(filename, reftime, inclusion, exclusion, expected_res
             ],
             id="test no matching pattern for conjunction",
         ),
+        pytest.param(
+            "my_folder/filename123",
+            {"group_patterns": [("~my_folder/file.*", "")]},
+            Fileinfo(
+                reftime=1563288717,
+                files={
+                    "my_folder/filename456": FileinfoItem(
+                        name="my_folder/filename456",
+                        missing=False,
+                        failed=False,
+                        size=348,
+                        time=1563288817,
+                    ),
+                },
+            ),
+            [
+                Result(state=State.OK, notice="Include patterns: ~my_folder/file.*"),
+                Result(
+                    state=State.UNKNOWN,
+                    summary="[my_folder/filename456] Age: -1 minute 40 seconds, Size: 348 B, The timestamp of the file is in the future. Please investigate your host times",
+                ),
+                Result(state=State.OK, summary="Count: 1"),
+                Metric("count", 1),
+                Result(state=State.OK, summary="Size: 348 B"),
+                Metric("size", 348),
+                Result(state=State.OK, summary="Largest size: 348 B"),
+                Metric("size_largest", 348),
+                Result(state=State.OK, summary="Smallest size: 348 B"),
+                Metric("size_smallest", 348),
+                Result(
+                    state=State.UNKNOWN,
+                    summary="Oldest age: -1 minute 40 seconds, The timestamp of the file is in the future. Please investigate your host times",
+                ),
+                Metric("age_oldest", -100.0),
+                Result(
+                    state=State.UNKNOWN,
+                    summary="Newest age: -1 minute 40 seconds, The timestamp of the file is in the future. Please investigate your host times",
+                ),
+                Metric("age_newest", -100.0),
+            ],
+            id="negative age",
+        ),
+        pytest.param(
+            "my_folder/filename123",
+            {"group_patterns": [("~my_folder/file.*", "")], "negative_age_tolerance": 150},
+            Fileinfo(
+                reftime=1563288717,
+                files={
+                    "my_folder/filename456": FileinfoItem(
+                        name="my_folder/filename456",
+                        missing=False,
+                        failed=False,
+                        size=348,
+                        time=1563288817,
+                    ),
+                },
+            ),
+            [
+                Result(state=State.OK, notice="Include patterns: ~my_folder/file.*"),
+                Result(
+                    state=State.OK, notice="[my_folder/filename456] Age: 0 seconds, Size: 348 B"
+                ),
+                Result(state=State.OK, summary="Count: 1"),
+                Metric("count", 1),
+                Result(state=State.OK, summary="Size: 348 B"),
+                Metric("size", 348),
+                Result(state=State.OK, summary="Largest size: 348 B"),
+                Metric("size_largest", 348),
+                Result(state=State.OK, summary="Smallest size: 348 B"),
+                Metric("size_smallest", 348),
+                Result(
+                    state=State.OK,
+                    summary="Oldest age: 0 seconds",
+                ),
+                Metric("age_oldest", 0.0),
+                Result(
+                    state=State.OK,
+                    summary="Newest age: 0 seconds",
+                ),
+                Metric("age_newest", 0.0),
+            ],
+            id="negative age within tolerance",
+        ),
     ],
 )
 def test_check_fileinfo_groups_data(item, params, parsed, expected_result):
@@ -447,7 +532,7 @@ def test_check_fileinfo_groups_data(item, params, parsed, expected_result):
 @pytest.mark.parametrize(
     "check_definition, params, expected_result",
     [
-        (
+        pytest.param(
             [
                 MetricInfo("Size", "size", 7, get_filesize_human_readable),
                 MetricInfo("Age", "age", 3, get_age_human_readable),
@@ -459,7 +544,36 @@ def test_check_fileinfo_groups_data(item, params, parsed, expected_result):
                 Result(state=State.OK, summary="Age: 3.00 s"),
                 Metric("age", 3),
             ],
-        )
+            id="age and size",
+        ),
+        pytest.param(
+            [
+                MetricInfo("Age", "age", -30, get_age_human_readable),
+            ],
+            {},
+            [
+                Result(
+                    state=State.UNKNOWN,
+                    summary="Age: -30.0 s, The timestamp of the file is in the future. Please investigate your host times",
+                ),
+                Metric("age", -30.0),
+            ],
+            id="negative age",
+        ),
+        pytest.param(
+            [
+                MetricInfo("Age", "age", -3, get_age_human_readable),
+            ],
+            {"negative_age_tolerance": 5},
+            [
+                Result(
+                    state=State.OK,
+                    summary="Age: 0.00 s",
+                ),
+                Metric("age", 0.0),
+            ],
+            id="negative age within tolerance",
+        ),
     ],
 )
 def test__fileinfo_check_function(check_definition, params, expected_result):

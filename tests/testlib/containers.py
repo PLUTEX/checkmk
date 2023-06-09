@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -90,25 +90,31 @@ def execute_tests_in_container(
             logger.info("| ")
             logger.info("| ... start whatever test you want, for example:")
             logger.info("| ")
-            logger.info("| make -C tests test-integration")
+            logger.info("| VERSION=git make -C tests test-integration")
             logger.info("| ")
             logger.info("|   Execute all integration tests")
             logger.info("| ")
             logger.info(
-                "| tests/scripts/run-integration-test.py "
+                "| VERSION=git tests/scripts/run-integration-test.py "
                 "tests/integration/livestatus/test_livestatus.py"
             )
             logger.info("| ")
             logger.info("|   Execute some integration tests")
             logger.info("| ")
             logger.info(
-                "| tests/scripts/run-integration-test.py "
+                "| VERSION=git tests/scripts/run-integration-test.py "
                 "tests/integration/livestatus/test_livestatus.py "
                 "-k test_service_custom_variables "
             )
             logger.info("| ")
             logger.info("|   Execute a single test")
             logger.info("| ")
+            logger.info("| !!!WARNING!!!")
+            logger.info("| The version of Checkmk you test against is set using the")
+            logger.info(
+                "| VERSION variable as seen above. Only 'git' tests against the code in your repo."
+            )
+            logger.info("| VERSION defaults to the current daily build of you branch.")
             logger.info("+-------------------------------------------------")
             dockerpty.start(client.api, container.id)
             return 0
@@ -296,7 +302,7 @@ def _create_cmk_image(
         logger.info("Finalizing image")
         labeled_container = client.containers.run(tmp_image, labels=new_labels, detach=True)
         image = labeled_container.commit(image_name_with_tag)
-        labeled_container.remove(force=True)
+        labeled_container.remove(v=True, force=True)
 
         logger.info("Commited image [%s] (%s)", image_name_with_tag, image.short_id)
 
@@ -471,7 +477,8 @@ def _start(client, **kwargs):
     try:
         yield c
     finally:
-        c.remove(force=True)
+        # Do not leave inactive containers and anonymous volumes behind
+        c.remove(v=True, force=True)
 
 
 def _exec_run(c, cmd, **kwargs):

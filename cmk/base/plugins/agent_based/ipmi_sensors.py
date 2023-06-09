@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -74,21 +74,24 @@ def parse_ipmi_sensors(  # pylint: disable=too-many-branches
             sensor.crit_high = _na_float(upper)
 
         elif len(stripped_line) == 6:
-            _sid, _name, _sensortype, reading_str, unit = stripped_line[:-1]
+            _sid, _name, type_, reading_str, unit = stripped_line[:-1]
             sensor.value = _na_float(reading_str)
             sensor.unit = _na_str(unit)
+            sensor.type_ = type_
 
         elif len(stripped_line) == 7:
-            _sid, _name, _sensortype, _sensorstatus, reading_str, unit = stripped_line[:-1]
+            _sid, _name, type_, sensorstatus, reading_str, unit = stripped_line[:-1]
+            sensor.state = ipmi_utils.Sensor.parse_state(sensorstatus)
             sensor.value = _na_float(reading_str)
             sensor.unit = _na_str(unit)
+            sensor.type_ = type_
 
         elif len(stripped_line) == 13:
             (
                 _sid,
                 _name,
-                _stype,
-                _sstate,
+                type_,
+                sensorstatus,
                 reading_str,
                 unit,
                 _lower_nr,
@@ -98,12 +101,14 @@ def parse_ipmi_sensors(  # pylint: disable=too-many-branches
                 upper_c,
                 _upper_nr,
             ) = stripped_line[:-1]
+            sensor.state = ipmi_utils.Sensor.parse_state(sensorstatus)
             sensor.value = _na_float(reading_str)
             sensor.unit = _na_str(unit)
             sensor.crit_low = _na_float(lower_c)
             sensor.warn_low = _na_float(lower_nc)
             sensor.warn_high = _na_float(upper_nc)
             sensor.crit_high = _na_float(upper_c)
+            sensor.type_ = type_
 
     return section
 
@@ -124,11 +129,7 @@ def discover_ipmi_sensors(
         yield Service(item="Summary FreeIPMI")
         return
 
-    yield from (
-        Service(item=sensor_name)
-        for sensor_name, sensor in section.items()
-        if not ipmi_utils.ignore_sensor(sensor_name, sensor.status_txt, ignore_params)
-    )
+    yield from ipmi_utils.discover_individual_sensors(ignore_params, section)
 
 
 def _status_txt_mapping(status_txt: str) -> State:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -600,6 +600,9 @@ class Overridable(Base):
 
     def is_published_to_me(self):
         """Whether or not the page is published to the currently active user"""
+        if not user.may("general.see_user_%s" % self.type_name()):
+            return False
+
         if self._["public"] is True:
             return self.publish_is_allowed()
 
@@ -811,7 +814,6 @@ class Overridable(Base):
             )
         )
 
-        # TODO: Bug: This permission does not seem to be used
         permission_registry.register(
             Permission(
                 section=PermissionSectionGeneral,
@@ -1357,12 +1359,15 @@ class Overridable(Base):
             if not user_errors:
                 cls.add_page(new_page)
                 cls.save_user_instances(owner_id)
-                if mode == "create":
-                    redirect_url = new_page.after_create_url() or back_url
+                if request.var("save_and_view"):
+                    redirect_url = new_page.after_create_url() or makeuri_contextless(
+                        request,
+                        [("name", new_page.name())],
+                        filename="%s.py" % cls.type_name(),
+                    )
                 else:
                     redirect_url = back_url
-
-                flash(_("Your changes haven been saved."))
+                    flash(_("Your changes have been saved."))
 
                 # Reload sidebar.TODO: This code logically belongs to PageRenderer. How
                 # can we simply move it there?
@@ -1558,10 +1563,6 @@ _save_pagetype_icons: Dict[str, Icon] = {
         "emblem": "time",
     },
     "graph_collection": "save_graph",
-    "graph_tuning": {
-        "icon": "save_graph",
-        "emblem": "settings",
-    },
     "view": "save_view",
 }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -14,7 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from itertools import islice
 from pathlib import Path
 from typing import Any, cast, Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -22,10 +22,11 @@ from typing import Any, cast, Dict, List, Mapping, Optional, Sequence, Tuple, Un
 import cmk.utils.debug
 import cmk.utils.log as log
 import cmk.utils.man_pages as man_pages
+import cmk.utils.password_store
 from cmk.utils.diagnostics import deserialize_cl_parameters, DiagnosticsCLParameters
 from cmk.utils.encoding import ensure_str_with_fallback
 from cmk.utils.exceptions import MKBailOut, MKGeneralException, MKSNMPError, OnError
-from cmk.utils.labels import DiscoveredHostLabelsStore
+from cmk.utils.labels import DiscoveredHostLabelsStore, HostLabelValueDict
 from cmk.utils.macros import replace_macros_in_str
 from cmk.utils.parameters import TimespecificParameters
 from cmk.utils.paths import (
@@ -159,6 +160,7 @@ class AutomationDiscovery(DiscoveryAutomation):
                 config_cache=config_cache,
                 host_config=host_config,
                 mode=mode,
+                keep_clustered_vanished_services=True,
                 service_filters=None,
                 on_error=on_error,
                 use_cached_snmp_data=use_cached_snmp_data,
@@ -169,6 +171,8 @@ class AutomationDiscovery(DiscoveryAutomation):
                 # Trigger the discovery service right after performing the discovery to
                 # make the service reflect the new state as soon as possible.
                 self._trigger_discovery_check(config_cache, host_config)
+
+        discovery.rewrite_cluster_host_labels_file(config_cache, hostnames)
 
         return automation_results.DiscoveryResult(results)
 
@@ -185,7 +189,9 @@ class AutomationTryDiscovery(Automation):
         buf = io.StringIO()
         with redirect_stdout(buf), redirect_stderr(buf):
             log.setup_console_logging()
-            check_preview_table, host_label_result = self._execute_discovery(args)
+            check_preview_table, host_label_result, host_labels_by_host = self._execute_discovery(
+                args
+            )
 
             def make_discovered_host_labels(
                 labels: Sequence[HostLabel],
@@ -214,18 +220,26 @@ class AutomationTryDiscovery(Automation):
                     [l for l in host_label_result.vanished if l.name not in changed_labels]
                 ),
                 changed_labels=changed_labels,
+                host_labels_by_host=host_labels_by_host,
             )
 
     def _execute_discovery(
         self, args: List[str]
     ) -> Tuple[
-        Sequence[automation_results.CheckPreviewEntry], discovery.QualifiedDiscovery[HostLabel]
+        Sequence[automation_results.CheckPreviewEntry],
+        discovery.QualifiedDiscovery[HostLabel],
+        Mapping[str, Mapping[str, HostLabelValueDict]],
     ]:
 
         use_cached_snmp_data = False
+        use_simulation_mode = config.simulation_mode
         if args[0] == "@noscan":
             args = args[1:]
-            use_cached_snmp_data = True
+            use_cached_snmp_data = True  # implies "use_outdated"
+            # Hack:
+            # This is currently the only way to make the fetcher rather fail than get live data if no cache is available.
+            # That is exacty what we want.
+            use_simulation_mode = True
 
         elif args[0] == "@scan":
             # Do a full service scan
@@ -237,12 +251,29 @@ class AutomationTryDiscovery(Automation):
         else:
             on_error = OnError.WARN
 
-        return discovery.get_check_preview(
-            host_name=HostName(args[0]),
-            max_cachefile_age=config.max_cachefile_age(),
-            use_cached_snmp_data=use_cached_snmp_data,
-            on_error=on_error,
-        )
+        with _simulation_mode(use_simulation_mode):
+            try:
+                host_name = HostName(args[0])
+                config_cache = config.get_config_cache()
+                config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({host_name})
+                return discovery.get_check_preview(
+                    host_name=host_name,
+                    max_cachefile_age=config.max_cachefile_age(),
+                    use_cached_snmp_data=use_cached_snmp_data,
+                    on_error=on_error,
+                )
+            except discovery.SourcesFailedError:
+                return [], discovery.QualifiedDiscovery.empty(), {}
+
+
+@contextmanager
+def _simulation_mode(value: bool):
+    old_value = config.simulation_mode
+    config.simulation_mode = value
+    try:
+        yield
+    finally:
+        config.simulation_mode = old_value
 
 
 automations.register(AutomationTryDiscovery())
@@ -397,7 +428,10 @@ class AutomationRenameHosts(Automation):
                 # force config generation to succeed. The core *must* start.
                 # TODO: Can't we drop this hack since we have config warnings now?
                 core_config.ignore_ip_lookup_failures()
-                AutomationStart().execute([])
+                # In this case the configuration is already locked by the caller of the automation.
+                # If that is on the local site, we can not lock the configuration again during baking!
+                # (If we are on a remote site now, locking *would* work, but we will not bake agents anyway.)
+                _execute_silently(CoreAction.START, skip_config_locking_in_bakery=True)
 
                 for hostname in core_config.failed_ip_lookups():
                     actions.append("dnsfail-" + hostname)
@@ -675,6 +709,7 @@ class AutomationGetServicesLabels(Automation):
     def execute(self, args: List[str]) -> automation_results.GetServicesLabelsResult:
         hostname, services = HostName(args[0]), args[1:]
         config_cache = config.get_config_cache()
+        config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({hostname})
 
         return automation_results.GetServicesLabelsResult(
             {service: config_cache.labels_of_service(hostname, service) for service in services}
@@ -694,6 +729,7 @@ class AutomationAnalyseServices(Automation):
         servicedesc = args[1]
 
         config_cache = config.get_config_cache()
+        config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({hostname})
         host_config = config_cache.get_host_config(hostname)
         host_attrs = core_config.get_host_attributes(hostname, config_cache)
 
@@ -844,6 +880,7 @@ class AutomationAnalyseHost(Automation):
     def execute(self, args: List[str]) -> automation_results.AnalyseHostResult:
         host_name = HostName(args[0])
         config_cache = config.get_config_cache()
+        config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({host_name})
         return automation_results.AnalyseHostResult(
             config_cache.get_host_config(host_name).labels,
             config_cache.get_host_config(host_name).label_sources,
@@ -1000,23 +1037,7 @@ class AutomationRestart(Automation):
         return CoreAction.RESTART
 
     def execute(self, args: List[str]) -> automation_results.RestartResult:
-        with redirect_stdout(open(os.devnull, "w")):
-            log.setup_console_logging()
-            try:
-                do_restart(
-                    create_core(config.monitoring_core),
-                    self._mode(),
-                    hosts_to_update=None if not args else set(args),
-                )
-            except (MKBailOut, MKGeneralException) as e:
-                raise MKAutomationError(str(e))
-
-            except Exception as e:
-                if cmk.utils.debug.enabled():
-                    raise
-                raise MKAutomationError(str(e))
-
-            return automation_results.RestartResult(core_config.get_configuration_warnings())
+        return _execute_silently(self._mode(), None if not args else set(args))
 
     def _check_plugins_have_changed(self) -> bool:
         last_time = self._time_of_last_core_restart()
@@ -1067,13 +1088,29 @@ class AutomationReload(AutomationRestart):
 automations.register(AutomationReload())
 
 
-class AutomationStart(AutomationRestart):
-    """Not an externally registered automation, just supporting the "rename-hosts" automation"""
+def _execute_silently(
+    action: CoreAction,
+    hosts_to_update: Optional[set[str]] = None,
+    skip_config_locking_in_bakery: bool = False,
+) -> automation_results.RestartResult:
+    with redirect_stdout(open(os.devnull, "w")):
+        log.setup_console_logging()
+        try:
+            do_restart(
+                create_core(config.monitoring_core),
+                action,
+                hosts_to_update=hosts_to_update,
+                skip_config_locking_in_bakery=skip_config_locking_in_bakery,
+            )
+        except (MKBailOut, MKGeneralException) as e:
+            raise MKAutomationError(str(e))
 
-    cmd = "start"
+        except Exception as e:
+            if cmk.utils.debug.enabled():
+                raise
+            raise MKAutomationError(str(e))
 
-    def _mode(self) -> CoreAction:
-        return CoreAction.START
+        return automation_results.RestartResult(core_config.get_configuration_warnings())
 
 
 class AutomationGetConfiguration(Automation):
@@ -1228,6 +1265,7 @@ class AutomationDiagHost(Automation):
         agent_port, snmp_timeout, snmp_retries = map(int, args[4:7])
 
         config_cache = config.get_config_cache()
+        config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({hostname})
         host_config = config_cache.get_host_config(hostname)
 
         # In 1.5 the tcp connect timeout has been added. The automation may
@@ -1531,6 +1569,7 @@ class AutomationActiveCheck(Automation):
         item = raw_item
 
         config_cache = config.get_config_cache()
+        config_cache.ruleset_matcher.ruleset_optimizer.set_all_processed_hosts({hostname})
         host_config = config_cache.get_host_config(hostname)
         with redirect_stdout(open(os.devnull, "w")):
             host_attrs = core_config.get_host_attributes(hostname, config_cache)
@@ -1560,11 +1599,12 @@ class AutomationActiveCheck(Automation):
 
         # Set host name for host_name()-function (part of the Check API)
         # (used e.g. by check_http)
+        stored_passwords = cmk.utils.password_store.load()
         with plugin_contexts.current_host(hostname):
             for params in dict(host_config.active_checks).get(plugin, []):
 
                 for description, command_args in core_config.iter_active_check_services(
-                    plugin, act_info, hostname, host_attrs, params
+                    plugin, act_info, hostname, host_attrs, params, stored_passwords
                 ):
                     if description != item:
                         continue

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 import contextlib
 import re
 import time
 from dataclasses import dataclass
+from html import escape
 from typing import (
     Any,
     Dict,
@@ -188,6 +189,9 @@ def match_attribute(attribute, pattern):
     if not pattern:
         return True
 
+    if attribute is None:
+        return False
+
     if pattern.startswith("~"):
         return bool(regex(pattern[1:]).match(attribute))
 
@@ -224,7 +228,7 @@ def process_matches(command_line: Sequence[str], process_pattern, match_groups=N
         return m
 
     # Exact match on name of executable
-    return command_line[0] == process_pattern
+    return command_line and command_line[0] == process_pattern
 
 
 # produce text or html output intended for the long output field of a check
@@ -233,14 +237,17 @@ def process_matches(command_line: Sequence[str], process_pattern, match_groups=N
 # value is again a 2-field tuple, first is the value, second is the unit.
 # This function is actually fairly generic so it could be used for other
 # data structured the same way
-def format_process_list(processes: "ProcessAggregator", html_output):
+def format_process_list(processes: Iterable[_Process], html_output: bool) -> str:
     def format_value(pvalue: _ProcessValue) -> str:
         value, unit = pvalue
         if unit == "kB":
             return render.bytes(float(value) * 1024)
         if isinstance(value, float):
             return "%.1f%s" % (value, unit)
-        return "%s%s" % (value, unit)
+        unescaped = "%s%s" % (value, unit)
+        # Handling of backslash-n vs newline is fundamentally broken when talking to the core.
+        # If we're creating HTML anyway, we can circumnavigate that...
+        return escape(unescaped).replace("\\", "&bsol;") if html_output else unescaped
 
     # keys to output and default values:
     headers: Mapping[str, _ProcessValue] = {
@@ -434,6 +441,8 @@ class ProcessAggregator:
             if pcpu_text == "-":  # Solaris defunct
                 pcpu_text = 0.0
             pcpu = float(pcpu_text) * self.core_weight(is_win=False)
+            if (pid := process_info.process_id) is not None:
+                process.append(("pid", (pid, "")))
 
         self.percent_cpu += pcpu
         process.append(("cpu usage", (pcpu, "%")))

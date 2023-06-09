@@ -1,6 +1,6 @@
 # Contributing to Checkmk
 
-Thanks for your interest to contribute to [Checkmk on Github](https://github.com/tribe29/checkmk)!
+Thanks for your interest to contribute to [Checkmk on Github](https://github.com/checkmk/checkmk)!
 
 Here are some ways you can help out:
 
@@ -191,7 +191,7 @@ To be able to do this, you need to prepare your project directory once with
 this command:
 
 ```console
-$ git remote add upstream https://github.com/tribe29/checkmk.git
+$ git remote add upstream https://github.com/checkmk/checkmk.git
 ```
 
 From now, you can always update your feature branches with this command:
@@ -216,7 +216,7 @@ This article on [how to amend a commit](https://www.burntfen.com/2015-10-30/how-
 
 ## How to execute tests
 
-The public repository of [Checkmk](https://github.com/tribe29/checkmk) is
+The public repository of [Checkmk](https://github.com/checkmk/checkmk) is
 integrated with Travis CI. Each time a Pull request is submitted, Travis will
 have a look at the changes.
 
@@ -1050,7 +1050,7 @@ files you want to contribute. The licensing information can be found at the begi
 of already existing files and looks something like
 
 ```python
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 ```

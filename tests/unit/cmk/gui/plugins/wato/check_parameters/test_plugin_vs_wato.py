@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -278,6 +278,7 @@ class ErrorReporter:
         ("discovery", "inventory_heartbeat_crm_rules"),
         ("discovery", "inventory_sap_values"),
         ("discovery", "inventory_solaris_services_rules"),
+        ("discovery", "inventory_windows_tasks_rules"),
         ("discovery", "oracle_performance_discovery"),
         ("discovery", "sap_value_groups"),
         ("inventory", "active_checks:cmk_inv"),
@@ -455,7 +456,6 @@ class ErrorReporter:
         ("check", "hitachi_hnas_bossock", "checkgroup_parameters:bossock_fibers"),
         ("check", "hivemanager_devices", "checkgroup_parameters:hivemanager_devices"),
         ("check", "hp_proliant_power", "checkgroup_parameters:epower_single"),
-        ("check", "hp_proliant_psu", "checkgroup_parameters:hw_psu"),
         ("check", "hpux_multipath", "checkgroup_parameters:hpux_multipath"),
         ("check", "huawei_osn_laser", "checkgroup_parameters:huawei_osn_laser"),
         ("check", "ibm_imm_fan", "checkgroup_parameters:hw_fans_perc"),
@@ -486,7 +486,6 @@ class ErrorReporter:
         ("check", "liebert_humidity_air", "checkgroup_parameters:humidity"),
         ("check", "lnx_quota", "checkgroup_parameters:lnx_quota"),
         ("check", "logins", "checkgroup_parameters:logins"),
-        ("check", "logwatch_ec", "checkgroup_parameters:logwatch_ec"),
         ("check", "lvm_vgs", "checkgroup_parameters:volume_groups"),
         ("check", "mikrotik_signal", "checkgroup_parameters:signal_quality"),
         ("check", "mongodb_collections", "checkgroup_parameters:mongodb_collections"),
@@ -496,7 +495,6 @@ class ErrorReporter:
         ("check", "msexch_isclienttype", "checkgroup_parameters:msx_info_store"),
         ("check", "msexch_isstore", "checkgroup_parameters:msx_info_store"),
         ("check", "mssql_connections", "checkgroup_parameters:mssql_connections"),
-        ("check", "mssql_jobs", "checkgroup_parameters:mssql_jobs"),
         ("check", "multipath", "checkgroup_parameters:multipath"),
         ("check", "mysql_slave", "checkgroup_parameters:mysql_slave"),
         ("check", "netapp_api_connection", "checkgroup_parameters:netapp_instance"),
@@ -535,7 +533,6 @@ class ErrorReporter:
         ("check", "tinkerforge_ambient", "checkgroup_parameters:brightness"),
         ("check", "tplink_mem", "checkgroup_parameters:memory_percentage_used"),
         ("check", "tplink_poe_summary", "checkgroup_parameters:epower_single"),
-        ("check", "ucs_c_rack_server_util_cpu", "checkgroup_parameters:cpu_utilization_multiitem"),
         ("check", "ups_in_freq", "checkgroup_parameters:efreq"),
         ("check", "ups_in_voltage", "checkgroup_parameters:evolt"),
         ("check", "ups_out_voltage", "checkgroup_parameters:evolt"),

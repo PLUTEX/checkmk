@@ -1,12 +1,14 @@
 # !/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 import json
 
 import pytest
+
+from tests.testlib.rest_api_client import PasswordClient
 
 from tests.unit.cmk.gui.conftest import WebTestAppForCMK
 
@@ -281,3 +283,40 @@ def test_password_with_newlines(
         activate_changes()
 
     password_store.load()  # see if it loads correctly
+
+
+@managedtest
+def test_password_min_length_create(password_client: PasswordClient) -> None:
+    resp = password_client.create(
+        ident="so_secret",
+        title="so_secret",
+        owner="admin",
+        password="",
+        shared=["all"],
+        expect_ok=False,
+    )
+
+    resp.assert_status_code(400)
+    assert resp.json["fields"] == {"password": ["string '' is too short. The minimum length is 1."]}
+
+
+@managedtest
+def test_password_min_length_update(password_client: PasswordClient) -> None:
+    password_client.create(
+        ident="so_secret",
+        title="so_secret",
+        owner="admin",
+        password="no_one_can_know",
+        shared=["all"],
+    )
+    resp = password_client.edit(
+        ident="so_secret",
+        title="so_secret",
+        owner="admin",
+        password="",
+        shared=["all"],
+        expect_ok=False,
+    )
+
+    resp.assert_status_code(400)
+    assert resp.json["fields"] == {"password": ["string '' is too short. The minimum length is 1."]}

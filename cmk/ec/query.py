@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 from logging import Logger
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import cmk.utils.regex
 from cmk.utils.exceptions import MKException
@@ -152,7 +152,7 @@ class QueryGET(Query):
             self.table.column_indices.get(column_name) for column_name in self.requested_columns  #
         ]
 
-    def filter_row(self, row: list[Any]) -> bool:
+    def filter_row(self, row: Sequence[Any]) -> bool:
         return all(
             predicate(row[self.table.column_indices[column_name]])
             for column_name, _operator_name, predicate, _argument in self.filters

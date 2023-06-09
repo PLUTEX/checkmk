@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -110,13 +110,9 @@ def _transform_aws(d):
 
 class AWSSpecialAgentValuespecBuilder:
     # Global services that should be present just in the CMK plus edition
-    PLUS_ONLY_GLOBAL_SERVICES = {
-        "cloudfront",
-    }
+    PLUS_ONLY_GLOBAL_SERVICES = {"cloudfront", "route53"}
     # Regional services that should be present just in the CMK plus edition
-    PLUS_ONLY_REGIONAL_SERVICES = {
-        "sns",
-    }
+    PLUS_ONLY_REGIONAL_SERVICES = {"sns", "lambda"}
 
     def __init__(self, plus_edition: bool):
         self.is_plus_edition = plus_edition
@@ -228,12 +224,19 @@ class AWSSpecialAgentValuespecBuilder:
                             "requests",
                             FixedValue(
                                 value=None,
-                                totext=_("Monitor request metrics"),
+                                totext=_(
+                                    "Monitor request metrics using the filter <tt>EntireBucket</tt>"
+                                ),
                                 title=_("Request metrics"),
                                 help=_(
-                                    "In order to monitor S3 request metrics you have to "
-                                    "enable request metric monitoring in the AWS/S3 console. "
-                                    "This is a paid feature"
+                                    "In order to monitor S3 request metrics, you have to enable "
+                                    "request metrics in the AWS/S3 console, see the "
+                                    "<a href='https://docs.aws.amazon.com/AmazonS3/latest/userguide/metrics-configurations.html'>AWS/S3 documentation</a>. "
+                                    "This is a paid feature. Note that the filter name has to be "
+                                    "set to <tt>EntireBucket</tt>, as is recommended in the "
+                                    "<a href='https://docs.aws.amazon.com/AmazonS3/latest/userguide/configure-request-metrics-bucket.html'>documentation for a filter that applies to all objects</a>. "
+                                    "The special agent will use this filter name to query S3 request "
+                                    "metrics from the AWS API."
                                 ),
                             ),
                         ),

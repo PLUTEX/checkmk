@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -34,6 +34,7 @@ import cmk.utils.tty as tty
 from cmk.utils.caching import config_cache as _config_cache
 from cmk.utils.check_utils import ActiveCheckResult
 from cmk.utils.exceptions import MKGeneralException, MKTimeout, OnError
+from cmk.utils.labels import HostLabelValueDict
 from cmk.utils.log import console
 from cmk.utils.parameters import TimespecificParameters
 from cmk.utils.type_defs import (
@@ -78,7 +79,7 @@ from cmk.base.discovered_labels import HostLabel, ServiceLabel
 
 from ._discovered_services import analyse_discovered_services
 from ._filters import ServiceFilters as _ServiceFilters
-from ._host_labels import analyse_host_labels, analyse_node_labels
+from ._host_labels import analyse_host_labels, analyse_node_labels, rewrite_cluster_host_labels_file
 from .utils import DiscoveryMode, QualifiedDiscovery, TimeLimitFilter
 
 _BasicTransition = Literal["old", "new", "vanished"]
@@ -197,6 +198,8 @@ def commandline_discovery(
         finally:
             cmk.utils.cleanup.cleanup_globals()
 
+    rewrite_cluster_host_labels_file(config_cache, host_names)
+
 
 def _preprocess_hostnames(
     arg_host_names: Set[HostName],
@@ -246,7 +249,7 @@ def _commandline_discovery_on_host(
 
     section.section_step("Analyse discovered host labels")
 
-    host_labels = analyse_node_labels(
+    host_labels, _labels_by_node = analyse_node_labels(
         host_key=host_key,
         host_key_mgmt=host_key_mgmt,
         parsed_sections_broker=parsed_sections_broker,
@@ -299,6 +302,7 @@ def automation_discovery(
     config_cache: config.ConfigCache,
     host_config: config.HostConfig,
     mode: DiscoveryMode,
+    keep_clustered_vanished_services: bool,
     service_filters: Optional[_ServiceFilters],
     on_error: OnError,
     use_cached_snmp_data: bool,
@@ -339,7 +343,7 @@ def automation_discovery(
         )
 
         if mode is not DiscoveryMode.REMOVE:
-            host_labels = analyse_host_labels(
+            host_labels, _labels_by_host = analyse_host_labels(
                 host_config=host_config,
                 parsed_sections_broker=parsed_sections_broker,
                 load_labels=True,
@@ -367,7 +371,12 @@ def automation_discovery(
 
         # Create new list of checks
         final_services = _get_post_discovery_autocheck_services(
-            host_name, services, service_filters or _ServiceFilters.accept_all(), result, mode
+            host_name,
+            services,
+            service_filters or _ServiceFilters.accept_all(),
+            result,
+            mode,
+            keep_clustered_vanished_services,
         )
         host_config.set_autochecks(list(final_services.values()))
 
@@ -396,9 +405,10 @@ def _get_post_discovery_autocheck_services(
     service_filters: _ServiceFilters,
     result: DiscoveryResult,
     mode: DiscoveryMode,
+    keep_clustered_vanished_services: bool,
 ) -> Mapping[ServiceID, autochecks.AutocheckServiceWithNodes]:
     """
-    The output contains a selction of services in the states "new", "old", "ignored", "vanished"
+    The output contains a selection of services in the states "new", "old", "ignored", "vanished"
     (depending on the value of `mode`) and "clusterd_".
 
     Service in with the state "custom", "active" and "manual" are currently not checked.
@@ -446,10 +456,11 @@ def _get_post_discovery_autocheck_services(
                     result.self_kept += 1
 
         else:
-            # Silently keep clustered services
-            post_discovery_services.update(
-                (s.service.id(), s) for s in discovered_services_with_nodes
-            )
+            if check_source != "clustered_vanished" or keep_clustered_vanished_services:
+                # Silently keep clustered services
+                post_discovery_services.update(
+                    (s.service.id(), s) for s in discovered_services_with_nodes
+                )
             if check_source == "clustered_new":
                 result.clustered_new += len(discovered_services_with_nodes)
             elif check_source == "clustered_old":
@@ -560,7 +571,7 @@ def active_check_discovery(
         on_scan_error=OnError.RAISE,
     )
 
-    host_labels = analyse_host_labels(
+    host_labels, _labels_by_node = analyse_host_labels(
         host_config=host_config,
         parsed_sections_broker=parsed_sections_broker,
         load_labels=True,
@@ -766,7 +777,10 @@ class _AutodiscoveryQueue:
 
     def add(self, host_name: HostName) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._file_path(host_name).touch()
+
+        file_path = self._file_path(host_name)
+        if not file_path.exists():
+            file_path.touch()
 
     def remove(self, host_name: HostName) -> None:
         with suppress(FileNotFoundError):
@@ -800,11 +814,13 @@ def discover_marked_hosts(core: MonitoringCore) -> None:
 
     activation_required = False
     rediscovery_reference_time = time.time()
+    hosts_processed = set()
 
     with TimeLimitFilter(limit=120, grace=10, label="hosts") as time_limited:
         for host_name in time_limited(autodiscovery_queue.queued_hosts()):
             if host_name not in process_hosts:
                 continue
+            hosts_processed.add(host_name)
 
             activation_required |= _discover_marked_host(
                 config_cache=config_cache,
@@ -813,6 +829,8 @@ def discover_marked_hosts(core: MonitoringCore) -> None:
                 reference_time=rediscovery_reference_time,
                 oldest_queued=oldest_queued,
             )
+
+    rewrite_cluster_host_labels_file(config_cache, hosts_processed)
 
     if not activation_required:
         return
@@ -874,6 +892,9 @@ def _discover_marked_host(
         config_cache=config_cache,
         host_config=host_config,
         mode=DiscoveryMode(rediscovery_parameters.get("mode")),
+        keep_clustered_vanished_services=rediscovery_parameters.get(
+            "keep_clustered_vanished_services", True
+        ),
         service_filters=_ServiceFilters.from_settings(rediscovery_parameters),
         on_error=OnError.IGNORE,
         use_cached_snmp_data=True,
@@ -1192,13 +1213,21 @@ def _cluster_service_entry(
     # In all other cases either both must be "new" or "vanished" -> let it be
 
 
+class SourcesFailedError(RuntimeError):
+    ...
+
+
 def get_check_preview(
     *,
     host_name: HostName,
     max_cachefile_age: cmk.core_helpers.cache.MaxAge,
     use_cached_snmp_data: bool,
     on_error: OnError,
-) -> Tuple[Sequence[CheckPreviewEntry], QualifiedDiscovery[HostLabel]]:
+) -> Tuple[
+    Sequence[CheckPreviewEntry],
+    QualifiedDiscovery[HostLabel],
+    Mapping[str, Mapping[str, HostLabelValueDict]],
+]:
     """Get the list of service of a host or cluster and guess the current state of
     all services if possible"""
     config_cache = config.get_config_cache()
@@ -1210,7 +1239,7 @@ def get_check_preview(
     cmk.core_helpers.cache.FileCacheFactory.use_outdated = True
     cmk.core_helpers.cache.FileCacheFactory.maybe = use_cached_snmp_data
 
-    parsed_sections_broker, _source_results, _fetcher_messages = make_broker(
+    parsed_sections_broker, source_results, _fetcher_messages = make_broker(
         config_cache=config_cache,
         host_config=host_config,
         ip_address=ip_address,
@@ -1221,8 +1250,12 @@ def get_check_preview(
         force_snmp_cache_refresh=not use_cached_snmp_data,
         on_scan_error=on_error,
     )
+    if failed_sources_results := list(
+        check_sources(source_results=source_results, mode=Mode.DISCOVERY, include_ok_results=False)
+    ):
+        raise SourcesFailedError("\n".join(r.summary for r in failed_sources_results))
 
-    host_labels = analyse_host_labels(
+    host_labels, labels_by_host = analyse_host_labels(
         host_config=host_config,
         parsed_sections_broker=parsed_sections_broker,
         load_labels=True,
@@ -1279,11 +1312,15 @@ def get_check_preview(
             for service in _manual_services(host_config).values()
         ]
 
-    return [
-        *passive_rows,
-        *_active_check_preview_rows(host_config, host_attrs),
-        *_custom_check_preview_rows(host_config),
-    ], host_labels
+    return (
+        [
+            *passive_rows,
+            *_active_check_preview_rows(host_config, host_attrs),
+            *_custom_check_preview_rows(host_config),
+        ],
+        host_labels,
+        labels_by_host,
+    )
 
 
 def _check_preview_table_row(

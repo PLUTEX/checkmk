@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 import json
@@ -12,6 +12,8 @@ from typing import Any, Iterator, Mapping, Union
 import pytest
 from freezegun import freeze_time
 from pytest import MonkeyPatch
+
+from tests.testlib.rest_api_client import RestApiClient
 
 from tests.unit.cmk.gui.conftest import WebTestAppForCMK
 
@@ -34,7 +36,55 @@ managedtest = pytest.mark.skipif(not version.is_managed_edition(), reason="see #
 
 
 @managedtest
-def test_openapi_customer(aut_user_auth_wsgi_app: WebTestAppForCMK, monkeypatch):
+def test_idle_timeout(aut_user_auth_wsgi_app: WebTestAppForCMK, monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "cmk.gui.watolib.global_settings.rulebased_notifications_enabled", lambda: True
+    )
+    user_detail = {
+        "username": "user",
+        "fullname": "User Name",
+        "customer": "global",
+        "idle_timeout": {"option": "individual", "duration": 666},
+    }
+
+    base = "/NO_SITE/check_mk/api/1.0"
+    with freeze_time("2010-02-01 08:00:00"):
+        resp = aut_user_auth_wsgi_app.call_method(
+            "post",
+            base + "/domain-types/user_config/collections/all",
+            params=json.dumps(user_detail),
+            headers={"Accept": "application/json"},
+            status=200,
+            content_type="application/json",
+        )
+
+    assert resp.json_body["extensions"]["idle_timeout"]["duration"] == 666
+
+    resp = aut_user_auth_wsgi_app.call_method(
+        "put",
+        base + "/objects/user_config/user",
+        params=json.dumps({"idle_timeout": {"option": "individual", "duration": 999}}),
+        headers={"Accept": "application/json"},
+        status=200,
+        content_type="application/json",
+    )
+    assert resp.json_body["extensions"]["idle_timeout"]["duration"] == 999
+
+    resp = aut_user_auth_wsgi_app.call_method(
+        "put",
+        base + "/objects/user_config/user",
+        params=json.dumps({"idle_timeout": {"option": "disable"}}),
+        headers={"Accept": "application/json"},
+        status=200,
+        content_type="application/json",
+    )
+    assert resp.json_body["extensions"]["idle_timeout"]["option"] == "disable"
+
+
+@managedtest
+def test_openapi_customer(
+    aut_user_auth_wsgi_app: WebTestAppForCMK, monkeypatch: MonkeyPatch
+) -> None:
     monkeypatch.setattr(
         "cmk.gui.watolib.global_settings.rulebased_notifications_enabled", lambda: True
     )
@@ -421,6 +471,67 @@ def test_openapi_user_edit_auth(aut_user_auth_wsgi_app: WebTestAppForCMK, monkey
         )
 
 
+@pytest.mark.parametrize(
+    "password,reason",
+    [
+        # Fail because the AUTH_PASSWORD schema requires minLength=1. (It also doesn't comply with
+        # the policy but we never get to checking that.)
+        ("", "These fields have problems: auth_option"),
+    ],
+)
+def test_openapi_create_user_password_failures(
+    aut_user_auth_wsgi_app: WebTestAppForCMK, password: str, reason: str
+) -> None:
+    """Test that invalid passwords are denied and handled gracefully"""
+
+    user_detail = complement_customer(
+        {
+            "username": "shortpw",
+            "fullname": "Short Password",
+            "roles": ["user"],
+            "auth_option": {"auth_type": "password", "password": password},
+        }
+    )
+
+    base = "/NO_SITE/check_mk/api/1.0"
+    response = aut_user_auth_wsgi_app.call_method(
+        "post",
+        base + "/domain-types/user_config/collections/all",
+        params=json.dumps(user_detail),
+        headers={"Accept": "application/json"},
+        status=400,
+        content_type="application/json",
+    )
+    assert reason in response.json["detail"]
+
+
+def test_openapi_automation_enforce_pw_change(aut_user_auth_wsgi_app: WebTestAppForCMK) -> None:
+    """
+    Test that password change cannot be force for automation users.
+    This should be caught by the schema.
+    """
+
+    user_detail = complement_customer(
+        {
+            "username": "automation_enforce_pw_change",
+            "fullname": "But I can't!",
+            "roles": ["user"],
+            "auth_option": {"auth_type": "automation", "enforce_password_change": True},
+        }
+    )
+
+    base = "/NO_SITE/check_mk/api/1.0"
+    response = aut_user_auth_wsgi_app.call_method(
+        "post",
+        base + "/domain-types/user_config/collections/all",
+        params=json.dumps(user_detail),
+        headers={"Accept": "application/json"},
+        status=400,
+        content_type="application/json",
+    )
+    assert '"enforce_password_change": ["Unknown field."]' in response
+
+
 @managedtest
 def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
     monkeypatch.setattr(
@@ -452,7 +563,7 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
                 "email": "",
                 "fallback_contact": False,
                 "password": "$5$rounds=535000$eUtToQgKz6n7Qyqk$hh5tq.snoP4J95gVoswOep4LbUxycNG1QF1HI7B4d8C",
-                "last_pw_change": 1265011200,
+                "last_pw_change": 1265011200,  # 2010-02-01 08:00:00
                 "serial": 1,
                 "disable_notifications": {},
             },
@@ -460,8 +571,9 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         }
     }
 
-    with run_as_superuser():
-        edit_users(user_data)
+    with freeze_time("2010-02-01 08:30:00"):
+        with run_as_superuser():
+            edit_users(user_data)
 
     assert _load_internal_attributes(name) == {
         "alias": "Foo Bar",
@@ -476,12 +588,12 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         "roles": ["user"],
         "password": "$5$rounds=535000$eUtToQgKz6n7Qyqk$hh5tq.snoP4J95gVoswOep4LbUxycNG1QF1HI7B4d8C",
         "serial": 1,
-        "last_pw_change": 1265011200,
+        "last_pw_change": 1265011200,  # 08:00:00 -- uses creation data, not current time
         "enforce_pw_change": True,
         "num_failed_logins": 0,
     }
 
-    with freeze_time("2010-02-01 08:30:00"):
+    with freeze_time("2010-02-01 09:00:00"):
         updated_internal_attributes = _api_to_internal_format(
             _load_user(name),
             {"auth_option": {"secret": "QWXWBFUCSUOXNCPJUMS@", "auth_type": "automation"}},
@@ -510,13 +622,13 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         "automation_secret": "QWXWBFUCSUOXNCPJUMS@",
         "password": "$5$rounds=535000$eUtToQgKz6n7Qyqk$hh5tq.snoP4J95gVoswOep4LbUxycNG1QF1HI7B4d8C",
         "serial": 1,  # this is 2 internally but the function is not invoked here
-        "last_pw_change": 1265011200,
+        "last_pw_change": 1265014800,  # 09:00:00 -- changed as secret was changed
         "enforce_pw_change": True,
         "num_failed_logins": 0,
         "connector": "htpasswd",
     }
 
-    with freeze_time("2010-02-01 09:00:00"):
+    with freeze_time("2010-02-01 09:30:00"):
         updated_internal_attributes = _api_to_internal_format(
             _load_user(name), {"auth_option": {"auth_type": "remove"}}
         )
@@ -541,7 +653,7 @@ def test_openapi_user_internal_auth_handling(monkeypatch, run_as_superuser):
         "locked": False,
         "roles": ["user"],
         "serial": 1,
-        "last_pw_change": 1265011200,  # no change in time from previous edit
+        "last_pw_change": 1265014800,  # 09:00:00 -- no change from previous edit (secret unchanged)
         "enforce_pw_change": True,
         "num_failed_logins": 0,
         "connector": "htpasswd",
@@ -1145,3 +1257,22 @@ def test_create_user_with_non_existing_custom_attribute(
         content_type="application/json",
         params=json.dumps(params),
     )
+
+
+@pytest.mark.parametrize(
+    "username",
+    [
+        "!@#@%)@!#&)!@*#$",  # disallowed characters
+        64 * "𐌈",  # too long
+    ],
+)
+def test_user_with_invalid_id(api_client: RestApiClient, username: str) -> None:
+    api_client.create_user(
+        username=username, fullname="Invalid name", expect_ok=False
+    ).assert_status_code(400)
+
+
+def test_openapi_edit_non_existing_user_regression(api_client: RestApiClient) -> None:
+    api_client.edit_user(
+        "i_do_not_exists", fullname="I hopefully won't crash the site!", expect_ok=False
+    ).assert_status_code(404)

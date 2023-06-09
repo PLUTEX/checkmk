@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Service discovery
@@ -68,6 +68,7 @@ DISCOVERY_PERMISSIONS = permissions.AllPerm(
         permissions.Optional(permissions.Perm("wato.service_discovery_to_ignored")),
         permissions.Optional(permissions.Perm("wato.service_discovery_to_removed")),
         permissions.Optional(permissions.Perm("wato.services")),
+        permissions.Ignore(permissions.Perm("wato.see_all_folders")),
     ]
 )
 
@@ -245,6 +246,7 @@ class UpdateDiscoveryPhase(BaseSchema):
                         permissions.Perm("wato.service_discovery_to_ignored"),
                         permissions.Perm("wato.service_discovery_to_undecided"),
                         permissions.Perm("wato.service_discovery_to_removed"),
+                        permissions.Ignore(permissions.Perm("wato.see_all_folders")),
                     ]
                 )
             ),
@@ -398,7 +400,7 @@ def _execute_service_discovery(
     if service_discovery_job.is_active():
         return Response(status=409)
     discovery_options = _discovery_options(DISCOVERY_ACTION[discovery_action.value])
-    if not has_discovery_action_specific_permissions(discovery_options.action):
+    if not has_discovery_action_specific_permissions(discovery_options.action, None):
         return problem(
             403,
             "You do not have the necessary permissions to execute this action",

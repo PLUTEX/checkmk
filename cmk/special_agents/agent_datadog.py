@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """
@@ -499,7 +499,7 @@ class LogAttributes(pydantic.BaseModel, frozen=True):
     # It was observed to be missing when setting log_query to the empty string.
     attributes: Mapping[str, Any] = pydantic.Field(default={})
     host: str
-    message: str
+    message: Optional[str] = None
     service: str
     status: str
     tags: Sequence[str]
@@ -559,10 +559,13 @@ class LogsQuerier:
             yield from (Log.parse_obj(raw_log) for raw_log in response["data"])
             if (meta := response.get("meta")) is None:
                 break
+
+            if "page" not in meta:
+                break
             cursor = meta["page"].get("after")
 
     def _query_time_range(self) -> tuple[datetime.datetime, datetime.datetime]:
-        now = datetime.datetime.fromtimestamp(time.time())
+        now = datetime.datetime.now()
         return now - datetime.timedelta(seconds=self.max_age), now
 
     def _query_logs_page_in_time_window(
@@ -575,8 +578,8 @@ class LogsQuerier:
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
             "filter": {
-                "from": start.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
-                "to": end.strftime("%Y-%m-%dT%H:%M:%S+00:00"),
+                "from": self._datetime_to_api_compliant_str(start),
+                "to": self._datetime_to_api_compliant_str(end),
                 "query": query,
                 "indexes": indexes,
             },
@@ -597,6 +600,10 @@ class LogsQuerier:
             resp = self.datadog_api.post_request("logs/events/search", body, version="v2")
         resp.raise_for_status()
         return resp.json()
+
+    @staticmethod
+    def _datetime_to_api_compliant_str(d: datetime.datetime) -> str:
+        return d.astimezone().isoformat(timespec="seconds")
 
 
 _SEVERITY_MAPPER: Mapping[str, int] = {

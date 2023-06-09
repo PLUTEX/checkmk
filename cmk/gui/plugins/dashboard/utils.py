@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Module to hold shared code for module internals and the plugins"""
@@ -935,13 +935,17 @@ def transform_stats_dashlet(dashlet_spec: DashletConfig) -> DashletConfig:
 
 
 def transform_timerange_dashlet(dashlet_spec: DashletConfig) -> DashletConfig:
-    dashlet_spec["timerange"] = {
+    old2new = {
         "0": "4h",
         "1": "25h",
         "2": "8d",
         "3": "35d",
         "4": "400d",
-    }.get(dashlet_spec["timerange"], dashlet_spec["timerange"])
+    }
+    # default to 25h
+    old_timerange = dashlet_spec.get("timerange", "1")
+    if old_timerange in old2new:
+        dashlet_spec["timerange"] = old2new[old_timerange]
     return dashlet_spec
 
 

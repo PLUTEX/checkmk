@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Status sidebar rendering"""
@@ -578,16 +578,10 @@ class SidebarRenderer:
 
 
 def _render_header_icon() -> None:
-    if user.get_attribute("nav_hide_icons_title"):
-        if theme.has_custom_logo():
-            html.img(theme.detect_icon_path(icon_name="logo", prefix="mk-"), class_="custom")
-        else:
-            html.img(theme.detect_icon_path(icon_name="icon_min", prefix="tribe29_"))
+    if theme.has_custom_logo("navbar_logo"):
+        html.img(theme.detect_icon_path(icon_name="navbar_logo", prefix=""), class_="custom")
     else:
-        if theme.has_custom_logo():
-            html.img(theme.detect_icon_path(icon_name="logo", prefix="mk-"))
-        else:
-            html.img(theme.detect_icon_path(icon_name="icon", prefix="tribe29_"))
+        html.icon("checkmk_logo" + ("_min" if user.get_attribute("nav_hide_icons_title") else ""))
 
 
 @cmk.gui.pages.register("side")

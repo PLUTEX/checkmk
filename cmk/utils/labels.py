@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Helper functions for dealing with Checkmk labels of all kind"""
@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Mapping, Tuple
 
 import cmk.utils.paths
 import cmk.utils.store as store
+from cmk.utils.caching import instance_method_lru_cache
 from cmk.utils.rulesets.ruleset_matcher import RulesetMatcher, RulesetMatchObject
 from cmk.utils.site import omd_site
 from cmk.utils.type_defs import HostLabelValueDict, HostName, Labels, LabelSources, ServiceName
@@ -36,6 +37,7 @@ class LabelManager:
         self._service_label_rules = service_label_rules
         self._discovered_labels_of_service = discovered_labels_of_service
 
+    @instance_method_lru_cache(maxsize=None)
     def labels_of_host(self, ruleset_matcher: RulesetMatcher, hostname: HostName) -> Labels:
         """Returns the effective set of host labels from all available sources
 

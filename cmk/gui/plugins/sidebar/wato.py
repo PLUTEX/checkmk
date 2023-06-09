@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -285,7 +285,7 @@ def render_tree_folder(tree_id, folder, js_func):
             for subfolder in sorted(subfolders, key=lambda x: x["title"].lower()):
                 render_tree_folder(tree_id, subfolder, js_func)
     else:
-        html.li(title)
+        html.li(title, class_="single")
 
     html.close_ul()
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Discovery of HostLabels
@@ -11,7 +11,7 @@ This module exposes three functions:
  * analyse_host_labels (dispatching to one of the above based on host_config.is_cluster)
 
 """
-from typing import Dict, Mapping, Sequence
+from typing import Dict, Iterable, Mapping, Sequence, TypeVar
 
 from cmk.utils.exceptions import MKGeneralException, MKTimeout, OnError
 from cmk.utils.labels import DiscoveredHostLabelsStore
@@ -20,7 +20,7 @@ from cmk.utils.type_defs import HostKey, HostName
 
 import cmk.base.config as config
 from cmk.base.agent_based.data_provider import ParsedSectionsBroker
-from cmk.base.discovered_labels import HostLabel
+from cmk.base.discovered_labels import HostLabel, HostLabelValueDict
 
 from .utils import QualifiedDiscovery
 
@@ -32,13 +32,12 @@ def analyse_host_labels(
     save_labels: bool,
     parsed_sections_broker: ParsedSectionsBroker,
     on_error: OnError,
-) -> QualifiedDiscovery[HostLabel]:
+) -> tuple[QualifiedDiscovery[HostLabel], Mapping[HostName, Mapping[str, HostLabelValueDict]]]:
     return (
         analyse_cluster_labels(
             host_config=host_config,
             parsed_sections_broker=parsed_sections_broker,
             load_labels=load_labels,
-            save_labels=save_labels,
             on_error=on_error,
         )
         if host_config.is_cluster
@@ -61,7 +60,7 @@ def analyse_node_labels(
     load_labels: bool,
     save_labels: bool,
     on_error: OnError,
-) -> QualifiedDiscovery[HostLabel]:
+) -> tuple[QualifiedDiscovery[HostLabel], Mapping[HostName, Mapping[str, HostLabelValueDict]]]:
     """Discovers and processes host labels per real host or node
 
     Side effects:
@@ -74,7 +73,7 @@ def analyse_node_labels(
     Some plugins discover services based on host labels, so the ruleset
     optimizer caches have to be cleared if new host labels are found.
     """
-    return _analyse_host_labels(
+    host_labels = _analyse_host_labels(
         host_name=host_key.hostname,
         discovered_host_labels=_discover_host_labels(
             host_key=host_key,
@@ -86,15 +85,21 @@ def analyse_node_labels(
         save_labels=save_labels,
     )
 
+    present_labels_dict = {l.name: l.to_dict() for l in _iter_kept_labels(host_labels)}
+
+    if save_labels:
+        DiscoveredHostLabelsStore(host_key.hostname).save(present_labels_dict)
+
+    return host_labels, {host_key.hostname: present_labels_dict}
+
 
 def analyse_cluster_labels(
     *,
     host_config: config.HostConfig,
     parsed_sections_broker: ParsedSectionsBroker,
     load_labels: bool,
-    save_labels: bool,
     on_error: OnError,
-) -> QualifiedDiscovery[HostLabel]:
+) -> tuple[QualifiedDiscovery[HostLabel], Mapping[HostName, Mapping[str, HostLabelValueDict]]]:
     """Discovers and processes host labels per cluster host
 
     Side effects:
@@ -108,42 +113,66 @@ def analyse_cluster_labels(
     optimizer caches have to be cleared if new host labels are found.
     """
     if not host_config.nodes:
-        return QualifiedDiscovery.empty()
+        return QualifiedDiscovery.empty(), {}
 
-    nodes_host_labels: Dict[str, HostLabel] = {}
+    labels_by_host: Dict[HostName, Mapping[str, HostLabelValueDict]] = {}
+    discovered_by_node: list[Mapping[str, HostLabel]] = []
     config_cache = config.get_config_cache()
 
     for node in host_config.nodes:
         node_config = config_cache.get_host_config(node)
 
-        node_result = analyse_node_labels(
+        node_result, labels_by_node = analyse_node_labels(
             host_key=node_config.host_key,
             host_key_mgmt=node_config.host_key_mgmt,
             parsed_sections_broker=parsed_sections_broker,
             load_labels=load_labels,
-            save_labels=save_labels,
+            save_labels=False,
             on_error=on_error,
         )
+        discovered_by_node.append({l.name: l for l in _iter_kept_labels(node_result)})
 
-        # keep the latest for every label.name
-        nodes_host_labels.update(
-            {
-                # TODO (mo): According to unit tests, this is what was done prior to refactoring.
-                # I'm not sure this is desired. If it is, it should be explained.
-                # Whenever we do not load the host labels, vanished will be empty.
-                **{l.name: l for l in node_result.vanished},
-                **{l.name: l for l in node_result.present},
-            }
-        )
+        labels_by_host.update(labels_by_node)
 
-    return _analyse_host_labels(
+    cluster_result = _analyse_host_labels(
         host_name=host_config.hostname,
-        discovered_host_labels=list(nodes_host_labels.values()),
+        discovered_host_labels=list(_merge_cluster_labels(discovered_by_node).values()),
         existing_host_labels=_load_existing_host_labels(host_config.hostname)
         if load_labels
         else (),
-        save_labels=save_labels,
+        save_labels=False,
     )
+    return cluster_result, {
+        **labels_by_host,
+        host_config.hostname: {l.name: l.to_dict() for l in _iter_kept_labels(cluster_result)},
+    }
+
+
+_TLabel = TypeVar("_TLabel")
+
+
+def _merge_cluster_labels(
+    all_node_labels: Sequence[Mapping[str, _TLabel]]
+) -> Mapping[str, _TLabel]:
+    """A cluster has all its nodes labels. Last node wins."""
+    return {name: label for node_labels in all_node_labels for name, label in node_labels.items()}
+
+
+def rewrite_cluster_host_labels_file(
+    config_cache: config.ConfigCache, nodes: Iterable[HostName]
+) -> None:
+    affected_clusters = {
+        cluster for node_name in nodes for cluster in config_cache.clusters_of(node_name)
+    }
+    for cluster in affected_clusters:
+        DiscoveredHostLabelsStore(cluster).save(
+            _merge_cluster_labels(
+                [
+                    DiscoveredHostLabelsStore(node_name).load()
+                    for node_name in (config_cache.nodes_of(cluster) or ())  # "or ()" just for mypy
+                ]
+            )
+        )
 
 
 def _analyse_host_labels(
@@ -159,16 +188,6 @@ def _analyse_host_labels(
         current=discovered_host_labels,
         key=lambda hl: hl.label,
     )
-
-    if save_labels:
-        DiscoveredHostLabelsStore(host_name).save(
-            {
-                # TODO (mo): I'm not sure this is desired. If it is, it should be explained.
-                # Whenever we do not load the host labels, vanished will be empty.
-                **{l.name: l.to_dict() for l in host_labels.vanished},
-                **{l.name: l.to_dict() for l in host_labels.present},
-            }
-        )
 
     if host_labels.new:
         # Some check plugins like 'df' may discover services based on host labels.
@@ -199,6 +218,15 @@ def _analyse_host_labels(
 def _load_existing_host_labels(host_name: HostName) -> Sequence[HostLabel]:
     raw_label_dict = DiscoveredHostLabelsStore(host_name).load()
     return [HostLabel.from_dict(name, value) for name, value in raw_label_dict.items()]
+
+
+def _iter_kept_labels(host_labels: QualifiedDiscovery[HostLabel]) -> Iterable[HostLabel]:
+    # TODO (mo): Clean this up, the logic is all backwards:
+    # It seems we always keep the vanished ones here.
+    # However: If we do not load the existing ones, no labels will be classified as 'vanished',
+    # and the ones that *are* in fact vanished are dropped silently.
+    yield from host_labels.vanished
+    yield from host_labels.present
 
 
 def _discover_host_labels(

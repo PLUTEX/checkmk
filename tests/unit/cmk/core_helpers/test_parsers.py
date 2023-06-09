@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -1247,6 +1247,20 @@ class TestMarkers:
         assert SectionMarker.is_footer(line) is False
         assert PiggybackMarker.is_header(line) is True
         assert PiggybackMarker.is_footer(line) is False
+
+    def test_piggybacked_host_translation_results_in_empty_string(self):
+        line = b"<<<<x>>>>"
+        translation = {
+            "case": None,
+            "drop_domain": False,
+            "mapping": (),
+            "regex": [
+                (".*(.*?)", r"\1"),
+            ],
+        }
+        assert PiggybackMarker.from_headerline(
+            line, translation, encoding_fallback="utf-8"
+        ).hostname == HostName("_")
 
     def test_piggybacked_host_footer(self):
         line = b"<<<<>>>>"

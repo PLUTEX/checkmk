@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -23,6 +23,7 @@ import cmk.utils.paths
 import cmk.utils.store as store
 import cmk.utils.version as cmk_version
 from cmk.utils.crypto import password_hashing
+from cmk.utils.crypto.password import Password
 from cmk.utils.type_defs import ContactgroupName, UserId
 
 import cmk.gui.background_job as background_job
@@ -214,10 +215,18 @@ def _save_failed_logins(username: UserId, count: int) -> None:
 # userdb.need_to_change_pw returns either False or the reason description why the
 # password needs to be changed
 def need_to_change_pw(username: UserId) -> Union[bool, str]:
-    if not _is_local_user(username):
+    # Don't require password change for users from other connections, their passwords are not
+    # managed here.
+    user = load_user(username)
+    if not _is_local_user(user):
         return False
 
-    if load_custom_attr(username, "enforce_pw_change", utils.saveint) == 1:
+    # Ignore the enforce_pw_change flag for automation users, they cannot change their passwords
+    # themselves. (Password age is checked for them below though.)
+    if (
+        not _is_automation_user(user)
+        and load_custom_attr(username, "enforce_pw_change", utils.saveint) == 1
+    ):
         return "enforced"
 
     last_pw_change = load_custom_attr(username, "last_pw_change", utils.saveint)
@@ -284,7 +293,7 @@ def make_two_factor_backup_codes() -> Tuple[List[str], List[str]]:
     for _index in range(10):
         code = utils.get_random_string(10)
         display_codes.append(code)
-        store_codes.append(password_hashing.hash_password(code))
+        store_codes.append(password_hashing.hash_password(Password(code)))
     return display_codes, store_codes
 
 
@@ -295,7 +304,7 @@ def is_two_factor_backup_code_valid(user_id: UserId, code: str) -> bool:
 
     for stored_code in credentials["backup_codes"]:
         try:
-            password_hashing.verify(code, stored_code)
+            password_hashing.verify(Password(code), stored_code)
             matched_code = stored_code
             break
         except (password_hashing.PasswordInvalidError, ValueError):
@@ -327,8 +336,12 @@ def load_user(user_id: UserId) -> UserSpec:
     return user
 
 
-def _is_local_user(user_id: UserId) -> bool:
-    return load_user(user_id).get("connector", "htpasswd") == "htpasswd"
+def _is_local_user(user: UserSpec) -> bool:
+    return user.get("connector", "htpasswd") == "htpasswd"
+
+
+def _is_automation_user(user: UserSpec) -> bool:
+    return user.get("automation_secret", None) is not None
 
 
 def user_locked(user_id: UserId) -> bool:
@@ -1204,7 +1217,7 @@ def create_cmk_automation_user() -> None:
         "alias": "Check_MK Automation - used for calling web services",
         "contactgroups": [],
         "automation_secret": secret,
-        "password": password_hashing.hash_password(secret),
+        "password": password_hashing.hash_password(Password(secret)),
         "roles": ["admin"],
         "locked": False,
         "serial": 0,
@@ -1343,7 +1356,7 @@ register_post_config_load_hook(update_config_based_user_attributes)
 #   +----------------------------------------------------------------------+
 
 
-def check_credentials(username: UserId, password: str) -> Union[UserId, Literal[False]]:
+def check_credentials(username: UserId, password: Password) -> Union[UserId, Literal[False]]:
     """Verify the credentials given by a user using all auth connections"""
     for connection_id, connection in active_connections():
         # None        -> User unknown, means continue with other connectors

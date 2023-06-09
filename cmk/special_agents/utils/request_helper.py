@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Common module request related stuff"""
@@ -99,7 +99,10 @@ class HTTPSAuthRequester(Requester):
     ) -> None:
         self._req_headers = {
             "Authorization": "Basic "
-            + base64.encodebytes(("%s:%s" % (username, password)).encode()).strip().decode()
+            + base64.encodebytes(("%s:%s" % (username, password)).encode())
+            .strip()
+            .decode()
+            .replace("\n", "")
         }
         self._base_url = "https://%s:%d/%s" % (server, port, base_url)
         self._opener = build_opener(HTTPSAuthHandler(HTTPSConfigurableConnection.IGNORE))

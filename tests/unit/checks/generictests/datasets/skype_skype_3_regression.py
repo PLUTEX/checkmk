@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -69,19 +69,31 @@ info = [
 
 
 checks = {
- 'edge': [(None, {'authentication_failures': {'upper': (20, 40)},
-                  'allocate_requests_exceeding': {"upper": (20, 40)},
-                  'packets_dropped': {"upper": (200, 400)},
-                  },
-           [(0, 'UDP auth failures/sec: 0.00', [('edge_udp_failed_auth', 0.0, 20, 40, None, None)]),
-            # The check crashed here with a KeyError.
-            (0, '', []),
-            # end
-            (0, 'UDP allocate requests > port limit/sec: 0.00', [
-               ('edge_udp_allocate_requests_exceeding_port_limit', 0.0, 20, 40, None, None)]),
-            (0, '', []),
-            (0, 'UDP packets dropped/sec: 0.00', [
-             ('edge_udp_packets_dropped', 0.0, 200, 400, None, None)]),
-            (0, '', [])]
-           )],
+    "edge": [
+        (
+            None,
+            {
+                "authentication_failures": {"upper": (20, 40)},
+                "allocate_requests_exceeding": {"upper": (20, 40)},
+                "packets_dropped": {"upper": (200, 400)},
+            },
+            [
+                (
+                    0,
+                    "UDP auth failures/sec: 0.00",
+                    [("edge_udp_failed_auth", 0.0, 20, 40, None, None)],
+                ),
+                (
+                    0,
+                    "UDP allocate requests > port limit/sec: 0.00",
+                    [("edge_udp_allocate_requests_exceeding_port_limit", 0.0, 20, 40, None, None)],
+                ),
+                (
+                    0,
+                    "UDP packets dropped/sec: 0.00",
+                    [("edge_udp_packets_dropped", 0.0, 200, 400, None, None)],
+                ),
+            ],
+        )
+    ],
 }

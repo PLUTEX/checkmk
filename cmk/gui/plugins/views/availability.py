@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -942,7 +942,9 @@ def show_bi_availability(view: "View", aggr_rows: "Rows") -> None:
 
                     html.write_text(" &nbsp; ")
                     html.icon_button(
-                        makeuri(request, [("timewarp", "")]), _("Close Timewarp"), "closetimewarp"
+                        makeuri(request, [], delvars=["timewarp"]),
+                        _("Close timewarp"),
+                        "closetimewarp",
                     )
                     html.write_text(
                         "%s %s"

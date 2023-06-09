@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -30,7 +30,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
             ],
         ),
         (
@@ -48,7 +52,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
             ],
@@ -68,7 +76,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.CRIT,
             [
-                Result(state=State.CRIT, summary="Status: ok"),
+                Result(
+                    state=State.CRIT,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
             ],
@@ -88,7 +100,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             True,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
             ],
         ),
@@ -107,7 +123,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             True,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 C"),
                 Metric("value", 1.04, levels=(None, 1.13)),
             ],
@@ -127,7 +147,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.WARN if txt.startswith("nc") else State.OK,
             [
-                Result(state=State.WARN, summary="Status: nc"),
+                Result(
+                    state=State.WARN,
+                    summary="Status: nc",
+                    details="Status: nc (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
             ],
@@ -147,7 +171,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(
                     state=State.CRIT,
                     summary="2.10 Volts (warn/crit at 1.13 Volts/1.13 Volts)",
@@ -171,7 +199,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(
                     state=State.CRIT,
                     summary="0.50 Volts (warn/crit below 0.97 Volts/0.97 Volts)",
@@ -207,7 +239,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
                 Result(
@@ -243,7 +279,11 @@ from cmk.base.plugins.agent_based.utils import ipmi
             False,
             lambda txt: State.OK,
             [
-                Result(state=State.OK, summary="Status: ok"),
+                Result(
+                    state=State.OK,
+                    summary="Status: ok",
+                    details="Status: ok (service state derived from sensor events)",
+                ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
                 Result(
@@ -271,10 +311,35 @@ from cmk.base.plugins.agent_based.utils import ipmi
                 Result(
                     state=State.UNKNOWN,
                     summary="Status: ok",
-                    details="Monitoring state of sensor status set by user-configured rules",
+                    details="Status: ok (service state set by user-configured rules)",
                 ),
                 Result(state=State.OK, summary="1.04 Volts"),
                 Metric("PCH_1.05V", 1.04, levels=(None, 1.13)),
+            ],
+        ),
+        (
+            "01-Inlet_Ambient",
+            {},
+            ipmi.Sensor(
+                status_txt="OK",
+                unit="C",
+                value=24.0,
+                crit_low=None,
+                warn_low=None,
+                warn_high=None,
+                crit_high=None,
+                type_="Temperature",
+            ),
+            True,
+            lambda txt: State.OK,
+            [
+                Result(
+                    state=State.OK,
+                    summary="Status: OK",
+                    details="Status: OK (service state derived from sensor events)",
+                ),
+                Result(state=State.OK, summary="24.00 C"),
+                Metric(name="value", value=24.0),
             ],
         ),
     ],
@@ -366,7 +431,7 @@ SECTION = {
         crit_high=None,
     ),
     "PS1_Status": ipmi.Sensor(
-        status_txt="ok (Presence detected, Failure detected     <= NOT OK !!)",
+        status_txt="ok (Presence detected, Failure detected)",
         unit="",
         value=None,
         crit_low=None,
@@ -403,7 +468,58 @@ SECTION = {
             lambda txt: State.OK,
             [
                 Metric("ambient_temp", 18.5),
-                Result(state=State.OK, summary="10 sensors OK"),
+                Result(state=State.OK, summary="10 sensors in total"),
+                Result(state=State.OK, summary="10 sensors ok"),
+                Result(
+                    state=State.OK,
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CPU: ok",
+                    details="CPU: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PCH_1.05V: ok",
+                    details="PCH_1.05V: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="MSR_Info_Log: ns (No Reading)",
+                    details="MSR_Info_Log: ns (No Reading) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="VCORE: ok (State Deasserted)",
+                    details="VCORE: ok (State Deasserted) (service state derived from sensor events)",
+                ),
             ],
         ),
         (
@@ -412,10 +528,59 @@ SECTION = {
             or ("State Deasserted" in txt and State.WARN or State.OK),
             [
                 Metric("ambient_temp", 18.5),
+                Result(state=State.OK, summary="10 sensors in total"),
+                Result(state=State.OK, summary="8 sensors ok"),
+                Result(
+                    state=State.OK,
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CPU: ok",
+                    details="CPU: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PCH_1.05V: ok",
+                    details="PCH_1.05V: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="MSR_Info_Log: ns (No Reading)",
+                    details="MSR_Info_Log: ns (No Reading) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state derived from sensor events)",
+                ),
+                Result(state=State.WARN, summary="1 sensors warning"),
+                Result(
+                    state=State.WARN,
+                    notice="VCORE: ok (State Deasserted)",
+                    details="VCORE: ok (State Deasserted) (service state derived from sensor events)",
+                ),
+                Result(state=State.CRIT, summary="1 sensors critical"),
                 Result(
                     state=State.CRIT,
-                    summary="10 sensors - 8 OK - 1 WARN: VCORE (ok (State Deasserted)) - 1 CRIT: PS1_Status (ok (Presence detected, Failure detected     <= NOT OK !!))",
-                    details="10 sensors - 8 OK - 1 WARN: VCORE (ok (State Deasserted)) - 1 CRIT: PS1_Status (ok (Presence detected, Failure detected     <= NOT OK !!))",
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state derived from sensor events)",
                 ),
             ],
         ),
@@ -424,11 +589,51 @@ SECTION = {
             lambda txt: State.OK,
             [
                 Metric("ambient_temp", 18.5),
+                Result(state=State.OK, summary="10 sensors in total"),
+                Result(state=State.OK, summary="8 sensors ok"),
                 Result(
                     state=State.OK,
-                    summary="10 sensors - 8 OK - 2 skipped",
-                    details="10 sensors - 8 OK - 2 skipped",
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state derived from sensor events)",
                 ),
+                Result(
+                    state=State.OK,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PCH_1.05V: ok",
+                    details="PCH_1.05V: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="MSR_Info_Log: ns (No Reading)",
+                    details="MSR_Info_Log: ns (No Reading) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state derived from sensor events)",
+                ),
+                Result(state=State.OK, summary="2 sensors skipped"),
+                Result(state=State.OK, notice="CPU: ok"),
+                Result(state=State.OK, notice="VCORE: ok (State Deasserted)"),
             ],
         ),
         (
@@ -436,11 +641,55 @@ SECTION = {
             lambda txt: State.OK,
             [
                 Metric("ambient_temp", 18.5),
+                Result(state=State.OK, summary="10 sensors in total"),
+                Result(state=State.OK, summary="9 sensors ok"),
                 Result(
                     state=State.OK,
-                    summary="10 sensors - 9 OK - 1 skipped",
-                    details="10 sensors - 9 OK - 1 skipped",
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state derived from sensor events)",
                 ),
+                Result(
+                    state=State.OK,
+                    notice="CPU: ok",
+                    details="CPU: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PCH_1.05V: ok",
+                    details="PCH_1.05V: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="VCORE: ok (State Deasserted)",
+                    details="VCORE: ok (State Deasserted) (service state derived from sensor events)",
+                ),
+                Result(state=State.OK, summary="1 sensors skipped"),
+                Result(state=State.OK, notice="MSR_Info_Log: ns (No Reading)"),
             ],
         ),
         (
@@ -454,10 +703,57 @@ SECTION = {
             [
                 Metric("ambient_temp", 18.5),
                 Result(
-                    state=State.WARN,
-                    summary="10 sensors - 9 WARN: Ambient (ok), CPU (ok), I2C4_error_ratio (ok), PCH_1.05V (ok), Total_Power (ok), CMOS_Battery (ok), PS1_Status (ok (Presence detected, Failure detected     <= NOT OK !!)), Power_Redundancy (ok (Fully Redundant)), VCORE (ok (State Deasserted)) - 1 skipped",
-                    details="10 sensors - 9 WARN: Ambient (ok), CPU (ok), I2C4_error_ratio (ok), PCH_1.05V (ok), Total_Power (ok), CMOS_Battery (ok), PS1_Status (ok (Presence detected, Failure detected     <= NOT OK !!)), Power_Redundancy (ok (Fully Redundant)), VCORE (ok (State Deasserted)) - 1 skipped",
+                    state=State.OK,
+                    summary="10 sensors in total",
                 ),
+                Result(state=State.WARN, summary="9 sensors warning"),
+                Result(
+                    state=State.WARN,
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="CPU: ok",
+                    details="CPU: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="PCH_1.05V: ok",
+                    details="PCH_1.05V: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state set by user-configured rules)",
+                ),
+                Result(
+                    state=State.WARN,
+                    notice="VCORE: ok (State Deasserted)",
+                    details="VCORE: ok (State Deasserted) (service state set by user-configured rules)",
+                ),
+                Result(state=State.OK, summary="1 sensors skipped"),
+                Result(state=State.OK, notice="MSR_Info_Log: ns (No Reading)"),
             ],
         ),
         (
@@ -476,10 +772,58 @@ SECTION = {
             lambda txt: State.OK,
             [
                 Metric("ambient_temp", 18.5),
+                Result(state=State.OK, summary="10 sensors in total"),
+                Result(state=State.OK, summary="9 sensors ok"),
+                Result(
+                    state=State.OK,
+                    notice="Ambient: ok",
+                    details="Ambient: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CPU: ok",
+                    details="CPU: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="I2C4_error_ratio: ok",
+                    details="I2C4_error_ratio: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Total_Power: ok",
+                    details="Total_Power: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="CMOS_Battery: ok",
+                    details="CMOS_Battery: ok (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="MSR_Info_Log: ns (No Reading)",
+                    details="MSR_Info_Log: ns (No Reading) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="PS1_Status: ok (Presence detected, Failure detected)",
+                    details="PS1_Status: ok (Presence detected, Failure detected) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="Power_Redundancy: ok (Fully Redundant)",
+                    details="Power_Redundancy: ok (Fully Redundant) (service state derived from sensor events)",
+                ),
+                Result(
+                    state=State.OK,
+                    notice="VCORE: ok (State Deasserted)",
+                    details="VCORE: ok (State Deasserted) (service state derived from sensor events)",
+                ),
+                Result(state=State.WARN, summary="1 sensors warning"),
                 Result(
                     state=State.WARN,
-                    summary="10 sensors - 9 OK - 1 WARN: PCH_1.05V: 1.04 Volts (warn/crit at 1.00 Volts/4.00 Volts)",
-                    details="10 sensors - 9 OK - 1 WARN: PCH_1.05V: 1.04 Volts (warn/crit at 1.00 Volts/4.00 Volts)",
+                    summary="PCH_1.05V: 1.04 Volts (warn/crit at 1.00 Volts/4.00 Volts)",
+                    details="PCH_1.05V: ok (service state derived from sensor events), PCH_1.05V: 1.04 Volts (warn/crit at 1.00 Volts/4.00 Volts)",
                 ),
             ],
         ),
@@ -496,3 +840,34 @@ def test_check_ipmi_summarized(params, status_txt_mapping, exp_result):
         )
         == exp_result
     )
+
+
+def test_freeipmi_supplied_state_wins() -> None:
+    assert list(
+        ipmi.check_ipmi(
+            "Summary",
+            {},
+            {
+                "PS1_Status": ipmi.Sensor(
+                    status_txt="ok (Presence detected, Failure detected)",
+                    unit="",
+                    state=State.WARN,
+                    value=None,
+                    crit_low=None,
+                    warn_low=None,
+                    warn_high=None,
+                    crit_high=None,
+                )
+            },
+            False,
+            lambda x: State.CRIT,
+        )
+    ) == [
+        Result(state=State.OK, summary="1 sensors in total"),
+        Result(state=State.WARN, summary="1 sensors warning"),
+        Result(
+            state=State.WARN,
+            notice="PS1_Status: ok (Presence detected, Failure detected)",
+            details="PS1_Status: ok (Presence detected, Failure detected) (service state reported by freeipmi)",
+        ),
+    ]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 import cmk.base.plugins.agent_based.utils.sap_hana as sap_hana
@@ -36,7 +36,9 @@ def parse_sap_hana_connect(info):
             if "Driver version" in elem:
                 inst["driver_version"] = elem.split("Driver version")[1].lstrip()
             if "Connect string:" in elem:
-                inst["server_node"] = re.search("SERVERNODE=(.*),SERVERDB", elem).group(1)
+                inst["server_node"] = re.search("SERVERNODE=(.*?),(SERVERDB|UID|PWD)", elem).group(
+                    1
+                )
             if "Select now()" in elem:
                 inst["timestamp"] = re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", elem).group()
 

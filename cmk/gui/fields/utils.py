@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 import collections
@@ -12,6 +12,7 @@ from marshmallow import ValidationError
 
 from livestatus import SiteId
 
+from cmk.utils import version
 from cmk.utils.tags import BuiltinTagConfig, TagGroup
 
 # There is an implicit dependency introduced by the collect_attributes call which is evaluated
@@ -34,6 +35,7 @@ class Attr(NamedTuple):
     description: str
     enum: Optional[List[Optional[str]]] = None
     field: Optional[fields.Field] = None
+    allow_none: bool = False
 
 
 ObjectType = Literal["host", "folder", "cluster"]
@@ -53,7 +55,7 @@ def collect_attributes(
             Either 'host', 'folder' or 'cluster'
 
         context:
-            Either 'create' or 'update'
+            Either 'create' or 'update' or 'view'
 
     Returns:
         A list of attribute describing named-tuples.
@@ -85,6 +87,10 @@ def collect_attributes(
 
     """
     something = TypeVar("something")
+
+    # Yes, this is ugly. But the attribute will not be found SOMETIMES if we don't do this.
+    if not version.is_raw_edition():
+        import cmk.gui.cee.plugins.wato.bake_agent_package_attribute as _unused  # pylint: disable=unused-import, no-name-in-module
 
     def _ensure(optional: Optional[something]) -> something:
         if optional is None:
@@ -131,7 +137,29 @@ def collect_attributes(
 
     tag_group: TagGroup
     for tag_group in tag_config.tag_groups:
-        description: List[str] = []
+        tag_name = _ensure(f"tag_{tag_group.id}")
+        section = tag_group.topic or "No topic"
+        mandatory = False
+        field = None
+
+        allowed_ids = [tag.id for tag in tag_group.tags]
+        if tag_group.is_checkbox_tag_group:
+            allowed_ids.insert(0, None)
+
+        if context == "view":
+            result.append(
+                Attr(
+                    name=tag_name,
+                    section=section,
+                    mandatory=mandatory,
+                    description="" if tag_group.help is None else tag_group.help,
+                    allow_none=None in allowed_ids,
+                    field=field,
+                )
+            )
+            continue
+
+        description: list[str] = []
         if tag_group.help:
             description.append(tag_group.help)
 
@@ -140,21 +168,17 @@ def collect_attributes(
             for tag in tag_group.tags:
                 description.append(f" * {_format(tag.id)}: {tag.title}")
 
-        allowed_ids = [tag.id for tag in tag_group.tags]
-        if tag_group.is_checkbox_tag_group:
-            allowed_ids.insert(0, None)
-
         result.append(
             Attr(
-                name=_ensure(f"tag_{tag_group.id}"),
-                section=tag_group.topic or "No topic",
-                mandatory=False,
+                name=tag_name,
+                section=section,
+                mandatory=mandatory,
                 description="\n\n".join(description),
                 enum=allowed_ids,
-                field=None,
+                allow_none=None in allowed_ids,
+                field=field,
             )
         )
-
     return result
 
 
@@ -224,8 +248,9 @@ def _field_from_attr(attr):
     # If we assigned None to enum, this would lead to a broken OpenApi specification!
     if attr.enum is not None:
         kwargs["enum"] = attr.enum
-        if None in attr.enum:
-            kwargs["allow_none"] = True
+
+    if attr.allow_none is True:
+        kwargs["allow_none"] = True
 
     if attr.name in validators:
         kwargs["validate"] = validators[attr.name]

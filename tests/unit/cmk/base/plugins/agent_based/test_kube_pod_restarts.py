@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2022 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2022 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -43,7 +43,7 @@ def string_table_element(restart_count):
                 "container_id": "docker://fcde010771eafc68bb644d180808d0f3f3f93c04a627a7cc53cb255efad99c5a",
                 "image_id": "some-id",
                 "name": f"doge-{i}",
-                "image": "tribe29/worker_agent:0.4",
+                "image": "checkmk/worker_agent:0.4",
                 "ready": True,
                 "state": {"type": "running", "start_time": 359},
                 "restart_count": restart_count,

@@ -1,4 +1,4 @@
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -9,7 +9,7 @@ Release:   1
 License:   GPL
 Group:     System/Monitoring
 URL:       https://checkmk.com/
-Vendor:    tribe29 GmbH
+Vendor:    Checkmk GmbH
 Source:    check-mk-agent-%{_version}.tar.gz
 BuildRoot: %{_topdir}/buildroot
 AutoReq:   off
@@ -41,11 +41,11 @@ define __spec_install_pre %{___build_pre} &&\
 %config(noreplace) /etc/check_mk/xinetd-service-template.cfg
 /usr/bin/check_mk_agent
 /usr/bin/check_mk_caching_agent
-/usr/bin/cmk-agent-ctl
 /usr/bin/mk-job
 /usr/bin/waitmax
 /usr/lib/check_mk_agent
 /var/lib/check_mk_agent
+/var/lib/cmk-agent/cmk-agent-ctl.gz
 /var/lib/cmk-agent/scripts/cmk-agent-useradd.sh
 /var/lib/cmk-agent/scripts/super-server/0_systemd/check-mk-agent-async.service
 /var/lib/cmk-agent/scripts/super-server/0_systemd/check-mk-agent.socket

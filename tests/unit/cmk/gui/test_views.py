@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -2665,6 +2665,7 @@ def test_registered_display_hints():
     '.hardware.storage.disks:*.bus',
     '.hardware.storage.disks:*.fsnode',
     '.hardware.storage.disks:*.controller',
+    '.hardware.storage.disks:*.drive_index',
     '.hardware.storage.disks:*.local',
     '.hardware.storage.disks:*.product',
     '.hardware.storage.disks:*.serial',
@@ -2776,6 +2777,14 @@ def test_registered_display_hints():
     '.software.applications.check_mk.sites:*.num_hosts',
     '.software.applications.check_mk.sites:*.num_services',
     '.software.applications.check_mk.sites:*.used_version',
+    ".software.applications.checkmk-agent.",
+    ".software.applications.checkmk-agent.version",
+    ".software.applications.checkmk-agent.agentdirectory",
+    ".software.applications.checkmk-agent.datadirectory",
+    ".software.applications.checkmk-agent.spooldirectory",
+    ".software.applications.checkmk-agent.pluginsdirectory",
+    ".software.applications.checkmk-agent.localdirectory",
+    ".software.applications.checkmk-agent.agentcontroller",
     '.software.applications.checkmk-agent.local_checks:',
     '.software.applications.checkmk-agent.plugins:',
     '.software.applications.citrix.',

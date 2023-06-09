@@ -89,7 +89,7 @@ ply = "==3.11"  # needed by pysmi, python-active-directory
 pysmi = "==0.3.4"  # needed by pysnmp
 pysnmp = "==4.4.12"  # needed by Event Console
 snmpsim = "==0.4.7"  # needed by SNMP integration tests
-certifi = "==2021.10.8"  # needed by requests
+certifi = "==2022.12.7"  # needed by requests
 chardet = "==4.0.0"  # needed by requests
 urllib3 = "==1.26.7"  # needed by requests
 pyOpenSSL = "==19.1.0"  # needed by requests with extras = ["security"]
@@ -119,9 +119,9 @@ oauthlib = "==3.1.0"  # needed by requests-oauthlib and jira
 requests-oauthlib = "==1.3.0"  # needed by jira
 requests-toolbelt = "==0.9.1"  # needed by jira
 docutils = "==0.17.1"  # needed by boto3 (aws)
-jira = "==2.0.0"  # needed by jira
+jira = "==3.4.1"  # needed by jira
 adal = "==1.2.0"  # needed by agent_azure
-Pillow = "==9.1.1"
+Pillow = "==9.4.0"
 python-ldap = "==3.4.0"  # needed by GUI (User sync), python-active-directory
 dicttoxml = "==1.7.4"  # needed by GUI (API XML format)
 Cython = "==0.29.19"  # needed by numpy
@@ -138,7 +138,7 @@ botocore = "==1.20.102"  # needed by boto3 (aws)
 s3transfer = "==0.4.2"  # needed by boto3 (aws)
 boto3 = "==1.17.102"  # needed by boto3 (aws)
 python-snap7 = "==0.10"  # needed by Siemens PLC special agent
-pymssql = "==2.1.5"  # needed by check_sql active check
+pymssql = "==2.2.7"  # needed by check_sql active check
 PyMySQL = "==0.9.3"  # needed by check_sql active check
 psycopg2-binary = "==2.9.1"  # needed by check_sql active check
 apispec = "==5.1.1"  # direct dependency
@@ -149,7 +149,7 @@ apispec-oneofschema = "==3.0.0"  # direct dependency
 typing_extensions = "==4.3.0"   # required by pydantic
 pydantic = "==1.8.2"  # needed by special agents
 paho-mqtt = "==1.6.1"  # needed for MQTT special agent
-python-active-directory = "==1.0.5"
+python-active-directory = "==2.0.1"
 rrdtool = "==0.1.15"  # Actually we ship the binding which comes with rrdtool itself...
 docstring_parser = "==0.13"  # direct dependency
 yapf = "==0.31.0"  # formatter for REST-API documentation code examples

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 from __future__ import annotations
@@ -24,6 +24,7 @@ from werkzeug.routing import Map, Rule, Submount
 
 import cmk.utils.store
 from cmk.utils import crash_reporting, paths
+from cmk.utils.crypto.password import Password
 from cmk.utils.exceptions import MKException
 from cmk.utils.type_defs import UserId
 
@@ -175,12 +176,13 @@ def user_from_basic_header(auth_header: str) -> Tuple[UserId, str]:
     return UserId(user_id), secret
 
 
-def user_from_bearer_header(auth_header: str) -> Tuple[UserId, str]:
+def user_from_bearer_header(auth_header: str) -> Tuple[UserId, Password]:
     """
 
     Examples:
 
-        >>> user_from_bearer_header("Bearer username password")
+        >>> username, password = user_from_bearer_header("Bearer username password")
+        >>> (username, password.raw)
         ('username', 'password')
 
     Args:
@@ -204,7 +206,7 @@ def user_from_bearer_header(auth_header: str) -> Tuple[UserId, str]:
     if "/" in user_id:
         raise MKAuthException("No slashes / allowed in username.")
 
-    return UserId(user_id), secret
+    return UserId(user_id), Password(secret)
 
 
 class EndpointAdapter:
@@ -416,7 +418,7 @@ class CheckmkRESTAPI:
         self.url_map = Map(
             [
                 Submount(
-                    "/<path:_path>",
+                    "/<_site>/check_mk/api/<_version>/",
                     [
                         Rule("/ui/", endpoint="swagger-ui"),
                         Rule("/ui/<path:path>", endpoint="swagger-ui"),
@@ -446,8 +448,12 @@ class CheckmkRESTAPI:
             else:
                 endpoint = None
 
-            # Remove _path again (see Submount above), so the validators don't go crazy.
-            path_args = {key: value for key, value in matched_path_args.items() if key != "_path"}
+            # Remove _site & _version (see Submount above), so the validators don't go crazy.
+            path_args = {
+                key: value
+                for key, value in matched_path_args.items()
+                if key not in ("_site", "_version")
+            }
 
             # This is an implicit dependency, as we only know the args at runtime, but the
             # function at setup-time.

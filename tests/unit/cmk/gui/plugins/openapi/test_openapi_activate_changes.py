@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2020 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2020 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -20,6 +20,16 @@ def test_openapi_show_activations(aut_user_auth_wsgi_app: WebTestAppForCMK):
     aut_user_auth_wsgi_app.call_method(
         "get",
         base + "/objects/activation_run/asdf/actions/wait-for-completion/invoke",
+        status=404,
+        headers={"Accept": "application/json"},
+    )
+
+
+def test_openapi_get_non_existing_activation(aut_user_auth_wsgi_app: WebTestAppForCMK) -> None:
+    base = "/NO_SITE/check_mk/api/1.0"
+    aut_user_auth_wsgi_app.call_method(
+        "get",
+        base + "/objects/activation_run/random_activation_id",
         status=404,
         headers={"Accept": "application/json"},
     )

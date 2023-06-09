@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -445,9 +445,9 @@ SECTION_SD = {
         "Power_On_Hours": 1609,
         "Program_Fail_Cnt_Total": 0,
         "Reallocated_Sector_Ct": 0,
-        "Reported_Uncorrect": 0,
+        "Uncorrectable_Error_Cnt": 0,
         "Runtime_Bad_Block": 0,
-        "Temperature_Celsius": 39,
+        "Temperature": 39,
         "Total_LBAs_Read": 10967739912,
         "Total_LBAs_Written": 7655764477,
         "UDMA_CRC_Error_Count": 0,
@@ -502,7 +502,7 @@ def test_parse_smart(string_table, section):
                         "Current_Pending_Sector": 0,
                         "End-to-End_Error": 0,
                         "Reallocated_Sector_Ct": 0,
-                        "Reported_Uncorrect": 0,
+                        "Uncorrectable_Error_Cnt": 0,
                         "UDMA_CRC_Error_Count": 0,
                     },
                 ),
@@ -534,7 +534,7 @@ def test_discover_smart_stats(section, discovered):
                 "Current_Pending_Sector": 0,
                 "End-to-End_Error": 0,
                 "Reallocated_Sector_Ct": 0,
-                "Reported_Uncorrect": 0,
+                "Uncorrectable_Error_Cnt": 0,
                 "UDMA_CRC_Error_Count": 0,
             },
             SECTION_SD,
@@ -544,7 +544,7 @@ def test_discover_smart_stats(section, discovered):
                 Result(state=State.OK, summary="Power cycles: 9"),
                 Metric("Power_Cycle_Count", 9),
                 Result(state=State.OK, summary="Uncorrectable errors: 0"),
-                Metric("Reported_Uncorrect", 0),
+                Metric("Uncorrectable_Error_Cnt", 0),
                 Result(state=State.OK, summary="Reallocated sectors: 0"),
                 Metric("Reallocated_Sector_Ct", 0),
                 Result(state=State.OK, summary="Pending sectors: 0"),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Caring about persistance of the discovered services (aka autochecks)"""
@@ -102,8 +102,8 @@ class AutochecksManager:
         get_service_description: GetServiceDescription,
     ) -> Mapping[str, ServiceLabel]:
         # NOTE: this returns an empty labels object for non-existing services
-        with suppress(KeyError):
-            return self._discovered_labels_of[hostname][service_desc]
+        if (loaded_labels := self._discovered_labels_of.get(hostname)) is not None:
+            return loaded_labels.get(service_desc, {})
 
         hosts_labels = self._discovered_labels_of.setdefault(hostname, {})
         # Only read the raw autochecks here, do not compute the effective

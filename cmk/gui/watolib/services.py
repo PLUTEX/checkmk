@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
 import ast
 import dataclasses
+import enum
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ from typing import (
     Callable,
     Iterable,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Sequence,
@@ -28,7 +30,15 @@ from typing import (
 from mypy_extensions import NamedArg
 
 import cmk.utils.rulesets.ruleset_matcher as ruleset_matcher
-from cmk.utils.type_defs import HostOrServiceConditions, Item, SetAutochecksTable
+from cmk.utils.labels import HostLabelValueDict
+from cmk.utils.type_defs import (
+    assert_never,
+    HostName,
+    HostOrServiceConditions,
+    Item,
+    SetAutochecksTable,
+)
+from cmk.utils.version import parse_check_mk_version
 
 from cmk.automations.results import CheckPreviewEntry, TryDiscoveryResult
 
@@ -38,7 +48,6 @@ from cmk.gui.background_job import BackgroundProcessInterface, JobStatusStates
 from cmk.gui.globals import config, user
 from cmk.gui.i18n import _
 from cmk.gui.sites import get_site_config, site_is_local
-from cmk.gui.watolib import CREHost
 from cmk.gui.watolib.automations import sync_changes_before_remote_automation
 from cmk.gui.watolib.check_mk_automations import (
     discovery,
@@ -47,7 +56,9 @@ from cmk.gui.watolib.check_mk_automations import (
     try_discovery,
     update_host_labels,
 )
+from cmk.gui.watolib.hosts_and_folders import CREHost
 from cmk.gui.watolib.rulesets import RuleConditions, service_description_to_condition
+from cmk.gui.watolib.utils import may_edit_ruleset
 from cmk.gui.watolib.wato_background_job import WatoBackgroundJob
 
 
@@ -107,16 +118,28 @@ class DiscoveryAction:
     UPDATE_SERVICES = "update_services"
 
 
+class UpdateType(enum.Enum):
+    "States that an individual service can be changed to by clicking a button"
+    UNDECIDED = "new"
+    MONITORED = "old"
+    IGNORED = "ignored"
+    REMOVED = "removed"
+
+
 class DiscoveryResult(NamedTuple):
     job_status: dict
     check_table_created: int
     check_table: Sequence[CheckPreviewEntry]
-    host_labels: dict
-    new_labels: dict
-    vanished_labels: dict
-    changed_labels: dict
+    host_labels: Mapping[str, HostLabelValueDict]
+    new_labels: Mapping[str, HostLabelValueDict]
+    vanished_labels: Mapping[str, HostLabelValueDict]
+    changed_labels: Mapping[str, HostLabelValueDict]
+    host_labels_by_host: Mapping[HostName, Mapping[str, HostLabelValueDict]]
 
-    def serialize(self) -> str:
+    def serialize(self, for_cmk_version: Optional[int]) -> str:
+        data_length = (
+            7 if for_cmk_version and for_cmk_version < parse_check_mk_version("2.1.0p27") else 8
+        )
         return repr(
             (
                 self.job_status,
@@ -126,7 +149,8 @@ class DiscoveryResult(NamedTuple):
                 self.new_labels,
                 self.vanished_labels,
                 self.changed_labels,
-            )
+                self.host_labels_by_host,
+            )[:data_length]
         )
 
     @classmethod
@@ -473,7 +497,7 @@ def perform_fix_all(
     """
     Handle fix all ('Accept All' on UI) discovery action
     """
-    _perform_update_host_labels(host, discovery_result.host_labels)
+    _perform_update_host_labels(discovery_result.host_labels_by_host)
     Discovery(
         host,
         discovery_options,
@@ -495,7 +519,7 @@ def perform_host_label_discovery(
     host: CREHost,
 ) -> DiscoveryResult:
     """Handle update host labels discovery action"""
-    _perform_update_host_labels(host, discovery_result.host_labels)
+    _perform_update_host_labels(discovery_result.host_labels_by_host)
     discovery_result = get_check_table(
         StartDiscoveryRequest(host, host.folder(), discovery_options)
     )
@@ -528,17 +552,69 @@ def perform_service_discovery(
     return discovery_result
 
 
-def has_discovery_action_specific_permissions(intended_discovery_action: str) -> bool:
-    if intended_discovery_action == DiscoveryAction.NONE and not user.may("wato.services"):
-        return False
-    if intended_discovery_action != DiscoveryAction.TABULA_RASA and not (
-        user.may("wato.service_discovery_to_undecided")
-        and user.may("wato.service_discovery_to_monitored")
-        and user.may("wato.service_discovery_to_ignored")
-        and user.may("wato.service_discovery_to_removed")
-    ):
-        return False
-    return True
+def has_discovery_action_specific_permissions(
+    intended_discovery_action: str, update_target: Optional[UpdateType]
+) -> bool:
+    def may_all(*permissions: str) -> bool:
+        return all(user.may(p) for p in permissions)
+
+    # not sure if the function even gets called for all of these.
+    if intended_discovery_action == DiscoveryAction.NONE:
+        return user.may("wato.services")
+    if intended_discovery_action == DiscoveryAction.STOP:
+        return user.may("wato.services")
+    if intended_discovery_action == DiscoveryAction.TABULA_RASA:
+        return may_all(
+            "wato.service_discovery_to_undecided",
+            "wato.service_discovery_to_monitored",
+            "wato.service_discovery_to_removed",
+        )
+    if intended_discovery_action == DiscoveryAction.FIX_ALL:
+        return may_all(
+            "wato.service_discovery_to_monitored",
+            "wato.service_discovery_to_removed",
+        )
+    if intended_discovery_action == DiscoveryAction.REFRESH:
+        return user.may("wato.services")
+    if intended_discovery_action == DiscoveryAction.SINGLE_UPDATE:
+        if update_target is None:
+            # This should never happen.
+            # The typing possibilities are currently so limited that I don't see a better solution.
+            # We only get here via the REST API, which does not allow SINGLE_UPDATES.
+            return False
+        return has_modification_specific_permissions(update_target)
+    if intended_discovery_action == DiscoveryAction.BULK_UPDATE:
+        return may_all(
+            "wato.service_discovery_to_monitored",
+            "wato.service_discovery_to_removed",
+        )
+    if intended_discovery_action == DiscoveryAction.UPDATE_HOST_LABELS:
+        return user.may("wato.services")
+    if intended_discovery_action == DiscoveryAction.UPDATE_SERVICES:
+        return user.may("wato.services")
+
+    # not sure if this can happen. Play it safe and require everything.
+    return may_all(
+        "wato.services",
+        "wato.service_discovery_to_undecided",
+        "wato.service_discovery_to_monitored",
+        "wato.service_discovery_to_ignored",
+        "wato.service_discovery_to_removed",
+    ) and may_edit_ruleset("ignored_services")
+
+
+def has_modification_specific_permissions(update_target: UpdateType) -> bool:
+    if update_target is UpdateType.MONITORED:
+        return user.may("wato.service_discovery_to_monitored")
+    if update_target is UpdateType.UNDECIDED:
+        return user.may("wato.service_discovery_to_undecided")
+    if update_target is UpdateType.REMOVED:
+        return user.may("wato.service_discovery_to_removed")
+    if update_target is UpdateType.IGNORED:
+        return user.may("wato.service_discovery_to_ignored") and may_edit_ruleset(
+            "ignored_services"
+        )
+    assert_never(update_target)
 
 
 def initial_discovery_result(
@@ -563,21 +639,27 @@ def _use_previous_discovery_result(previous_discovery_result: Optional[Discovery
     return True
 
 
-def _perform_update_host_labels(host, host_labels):
-    message = _("Updated discovered host labels of '%s' with %d labels") % (
-        host.name(),
-        len(host_labels),
-    )
-    watolib.add_service_change(
-        host,
-        "update-host-labels",
-        message,
-    )
-    update_host_labels(
-        host.site_id(),
-        host.name(),
-        host_labels,
-    )
+def _perform_update_host_labels(
+    labels_by_nodes: Mapping[HostName, Mapping[str, HostLabelValueDict]]
+) -> None:
+    for host_name, host_labels in labels_by_nodes.items():
+        if (host := CREHost.host(host_name)) is None:
+            raise ValueError(f"no such host: {host_name!r}")
+
+        message = _("Updated discovered host labels of '%s' with %d labels") % (
+            host_name,
+            len(host_labels),
+        )
+        watolib.add_service_change(
+            host,
+            "update-host-labels",
+            message,
+        )
+        update_host_labels(
+            host.site_id(),
+            host.name(),
+            host_labels,
+        )
 
 
 def _apply_state_change(  # pylint: disable=too-many-branches
@@ -767,6 +849,7 @@ class ServiceDiscoveryBackgroundJob(WatoBackgroundJob):
             host_name=host_name,
             estimated_duration=last_job_status.get("duration"),
         )
+        self._host_name = host_name
         self._pre_try_discovery = (
             0,
             TryDiscoveryResult(
@@ -776,6 +859,7 @@ class ServiceDiscoveryBackgroundJob(WatoBackgroundJob):
                 new_labels={},
                 vanished_labels={},
                 changed_labels={},
+                host_labels_by_host={},
             ),
         )
 
@@ -855,6 +939,10 @@ class ServiceDiscoveryBackgroundJob(WatoBackgroundJob):
             new_labels=result.new_labels,
             vanished_labels=result.vanished_labels,
             changed_labels=result.changed_labels,
+            # versions before this commit did not send the host labels per node.
+            # For a real host (not a cluster) the fallback is the same, but for a cluster we only get the
+            # merged labels of the cluster, not for the individual nodes. See Werk #15530
+            host_labels_by_host=result.host_labels_by_host or {self._host_name: result.host_labels},
         )
 
     @staticmethod

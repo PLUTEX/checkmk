@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Mode for trying out the logwatch patterns"""
@@ -299,7 +299,16 @@ class ModePatternEditor(WatoMode):
                     cls: List[str] = []
                     if match_class == "match first":
                         cls = ["state%d" % logwatch.level_state(state), "fillbackground"]
-                    table.cell(_("State"), html.render_span(logwatch.level_name(state)), css=cls)
+                    table.cell(
+                        _("Checkmk state"),
+                        html.render_span(logwatch.level_name(state)),
+                        css=cls,
+                    )
+                    table.cell(
+                        _("Logwatch state"),
+                        html.render_span(logwatch.logwatch_level_name(state)),
+                        css=cls,
+                    )
                     table.cell(_("Pattern"), html.render_tt(pattern))
                     table.cell(_("Comment"), comment)
                     table.cell(_("Matched line"), disp_match_txt)

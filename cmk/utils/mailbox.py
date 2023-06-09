@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -39,6 +39,10 @@ from exchangelib import (  # type: ignore[import]
     DELEGATE,
     EWSDateTime,
     EWSTimeZone,
+    Identity,
+    IMPERSONATION,
+    OAUTH2,
+    OAuth2Credentials,
     protocol,
 )
 
@@ -62,10 +66,26 @@ class EWS:
         self._selected_folder = self._account.inbox
 
     def folders(self) -> Iterable[str]:
-        return list(map(lambda x: str(x.name), self._account.msg_folder_root.children))
+        logging.debug("Account::msg_folder_root.tree():\n%s", self._account.msg_folder_root.tree())
+        logging.debug(
+            "folder, [folder.children]:\n%s",
+            "\n".join(
+                f"{folder} {list(map(lambda x: str(x.name), folder.children))}"
+                for folder in self._account.msg_folder_root.children
+            ),
+        )
+
+        # Return a folders 'absolute' path as it's shown in the UI.
+        # Since `.absolute` returns a path with a useless and longish prefix
+        # this has to be removed.
+        root_folder = f"{self._account.msg_folder_root.absolute}/"
+        return [f.absolute[len(root_folder) :] for f in self._account.msg_folder_root.walk()]
 
     def select_folder(self, folder_name: str) -> int:
-        self._selected_folder = self._account.msg_folder_root / folder_name
+        selected_folder = self._account.msg_folder_root
+        for s in folder_name.split("/"):
+            selected_folder /= s
+        self._selected_folder = selected_folder
         return int(self._selected_folder.total_count)
 
     def mail_ids_by_date(
@@ -228,7 +248,7 @@ class Mailbox:
     """
 
     def __init__(self, args: Args) -> None:
-        self._connection = None
+        self._connection: Any = None  # TODO: Typing is quite broken below...
         self._args = args
 
     def __enter__(self) -> "Mailbox":
@@ -260,22 +280,50 @@ class Mailbox:
             if self._args.no_cert_check:
                 protocol.BaseProtocol.HTTP_ADAPTER_CLS = protocol.NoVerifyHTTPAdapter
 
-            connection = EWS(
-                Account(
-                    primary_smtp_address=self._args.fetch_email_address
-                    or self._args.fetch_username,
-                    autodiscover=False,
-                    access_type=DELEGATE,
-                    config=Configuration(
-                        server=self._args.fetch_server,
-                        credentials=Credentials(
-                            self._args.fetch_username,
-                            self._args.fetch_password,
-                        ),
-                    ),
+            primary_smtp_address = self._args.fetch_email_address or self._args.fetch_username
+
+            # https://ecederstrand.github.io/exchangelib/#oauth-on-office-365
+
+            self._connection = (
+                (
+                    EWS(
+                        Account(
+                            primary_smtp_address=primary_smtp_address,
+                            autodiscover=False,
+                            access_type=IMPERSONATION,
+                            config=Configuration(
+                                server=self._args.fetch_server,
+                                credentials=OAuth2Credentials(
+                                    client_id=self._args.fetch_client_id,
+                                    client_secret=self._args.fetch_client_secret,
+                                    tenant_id=self._args.fetch_tenant_id,
+                                    identity=Identity(smtp_address=primary_smtp_address),
+                                ),
+                                auth_type=OAUTH2,
+                            ),
+                            default_timezone=EWSTimeZone("Europe/Berlin"),
+                        )
+                    )
+                )
+                if self._args.fetch_client_id
+                else (
+                    EWS(
+                        Account(
+                            primary_smtp_address=primary_smtp_address,
+                            autodiscover=False,
+                            access_type=DELEGATE,
+                            config=Configuration(
+                                server=self._args.fetch_server,
+                                credentials=Credentials(
+                                    self._args.fetch_username,
+                                    self._args.fetch_password,
+                                ),
+                            ),
+                            default_timezone=EWSTimeZone("Europe/Berlin"),
+                        )
+                    )
                 )
             )
-            self._connection = connection  # type: ignore[assignment]
 
         assert self._connection is None
         try:
@@ -495,7 +543,8 @@ class Mailbox:
             self._connection.close()
 
 
-def parse_arguments(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Args:
+def parse_arguments(parser: argparse.ArgumentParser, argv: Sequence[str], allow_ews: bool) -> Args:
+    protocols = {"IMAP", "POP3", "EWS"} if allow_ews else {"IMAP", "POP3"}
     parser.formatter_class = argparse.RawTextHelpFormatter
     parser.add_argument(
         "--debug",
@@ -512,37 +561,51 @@ def parse_arguments(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Arg
 
     parser.add_argument(
         "--fetch-server",
-        type=str,
         required=True,
         metavar="ADDRESS",
-        help="Host address of the IMAP/POP3/EWS server hosting your mailbox",
+        help=f"Host address of the {'/'.join(protocols)} server hosting your mailbox",
     )
     parser.add_argument(
         "--fetch-username",
-        type=str,
-        required=True,
+        required=False,
         metavar="USER",
-        help="Username to use for IMAP/POP3/EWS",
+        help=f"Username to use for {'/'.join(protocols)}",
     )
     parser.add_argument(
         "--fetch-email-address",
-        type=str,
         required=False,
         metavar="EMAIL-ADDRESS",
         help="Email address (default: same as username, only effects EWS protocol)",
     )
     parser.add_argument(
         "--fetch-password",
-        type=str,
-        required=True,
+        required=False,
         metavar="PASSWORD",
-        help="Password to use for IMAP/POP3/EWS",
+        help="Password to use for {'/'.join(protocols)}",
+    )
+    parser.add_argument(
+        "--fetch-client-id",
+        required=False,
+        metavar="CLIENT_ID",
+        help="OAuth2 ClientID for EWS" if allow_ews else "Ignored, only for compatibility",
+    )
+    parser.add_argument(
+        "--fetch-client-secret",
+        required=False,
+        metavar="CLIENT_SECRET",
+        help="OAuth2 ClientSecret for EWS" if allow_ews else "Ignored, only for compatibility",
+    )
+    parser.add_argument(
+        "--fetch-tenant-id",
+        required=False,
+        metavar="TENANT_ID",
+        help="OAuth2 TenantID for EWS" if allow_ews else "Ignored, only for compatibility",
     )
     parser.add_argument(
         "--fetch-protocol",
         type=str.upper,
-        choices={"IMAP", "POP3", "EWS"},
-        help="Set to 'IMAP', 'POP3' or 'EWS', depending on your mailserver (default=IMAP)",
+        choices=protocols,
+        help="Protocol used for fetching mail (default=IMAP)",
     )
     parser.add_argument(
         "--fetch-port",
@@ -558,7 +621,10 @@ def parse_arguments(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Arg
         help="Use TLS/SSL for feching the mailbox (disabled by default)",
     )
     parser.add_argument(
-        "--no-cert-check", action="store_true", help="Don't enforce SSL/TLS certificate validation"
+        "--no-cert-check",
+        "--fetch-disable-cert-validation",
+        action="store_true",
+        help="Don't enforce SSL/TLS certificate validation",
     )
 
     parser.add_argument("--verbose", "-v", action="count", default=0)
@@ -569,6 +635,22 @@ def parse_arguments(parser: argparse.ArgumentParser, argv: Sequence[str]) -> Arg
         # we have no efficient way to control the output on stderr but at least we can return
         # UNKNOWN
         raise SystemExit(3)
+
+    if not tuple(
+        map(
+            bool,
+            (
+                args.fetch_username,
+                args.fetch_password,
+                args.fetch_client_id,
+                args.fetch_client_secret,
+                args.fetch_tenant_id,
+            ),
+        )
+    ) in {(True, True, False, False, False), (False, False, True, True, True)}:
+        raise RuntimeError(
+            "Either Username/Passwort or ClientID/ClientSecret/TenantID have to be set"
+        )
 
     args.fetch_port = args.fetch_port or (
         (995 if args.fetch_tls else 110)
@@ -589,10 +671,11 @@ def _active_check_main_core(
     argument_parser: argparse.ArgumentParser,
     check_fn: Callable[[Args], CheckResult],
     argv: Sequence[str],
+    allow_ews: bool = True,
 ) -> CheckResult:
     """Main logic for active checks"""
     # todo argparse - exceptions?
-    args = parse_arguments(argument_parser, argv)
+    args = parse_arguments(argument_parser, argv, allow_ews)
     logging.basicConfig(
         level=logging.CRITICAL
         if not (args.debug or args.verbose > 0)
@@ -650,6 +733,7 @@ def _output_check_result(text: str, perfdata: PerfData) -> None:
 def active_check_main(
     argument_parser: argparse.ArgumentParser,
     check_fn: Callable[[Args], CheckResult],
+    allow_ews: bool = True,
 ) -> None:
     """Evaluate the check, write output according to Checkmk active checks and terminate the
     program in respect to the check result:
@@ -663,6 +747,8 @@ def active_check_main(
     Therefore _active_check_main_core and _output_check_result should be used for unit tests since
     they are not meant to modify the system environment or terminate the process."""
     cmk.utils.password_store.replace_passwords()  # type: ignore[no-untyped-call]
-    exitcode, status, perfdata = _active_check_main_core(argument_parser, check_fn, sys.argv[1:])
+    exitcode, status, perfdata = _active_check_main_core(
+        argument_parser, check_fn, sys.argv[1:], allow_ews
+    )
     _output_check_result(status, perfdata)
     raise SystemExit(exitcode)

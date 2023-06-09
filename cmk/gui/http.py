@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Wrapper layer between WSGI and GUI application code"""
@@ -16,8 +16,8 @@ from six import ensure_str
 from werkzeug.utils import get_content_type
 
 from cmk.utils.site import url_prefix
+from cmk.utils.urls import is_allowed_url
 
-import cmk.gui.utils as utils
 from cmk.gui.exceptions import MKGeneralException, MKUserError
 from cmk.gui.i18n import _
 
@@ -372,7 +372,7 @@ class Request(
         url = self.var(varname)
         assert url is not None
 
-        if not utils.is_allowed_url(url):
+        if not is_allowed_url(url):
             if deflt:
                 return deflt
             raise MKUserError(varname, _('The parameter "%s" is not a valid URL.') % varname)

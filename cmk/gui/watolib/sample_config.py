@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2021 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2021 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 """Create an initial Checkmk configuration for new sites"""
@@ -246,6 +246,7 @@ class ConfigGeneratorBasicWATOConfig(SampleConfigGenerator):
                     "value": {
                         "severity_unmonitored": 1,
                         "severity_vanished": 0,
+                        "severity_new_host_label": 1,
                         "check_interval": 120.0,
                     },
                     "options": {"description": "Perform every two hours a service discovery"},

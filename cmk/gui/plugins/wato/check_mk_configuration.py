@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright (C) 2019 tribe29 GmbH - License: GNU General Public License v2
+# Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
 
@@ -92,6 +92,7 @@ from cmk.gui.valuespec import (
 )
 from cmk.gui.watolib.bulk_discovery import vs_bulk_discovery
 from cmk.gui.watolib.groups import load_contact_group_information
+from cmk.gui.watolib.users import vs_idle_timeout_duration
 
 #   .--Global Settings-----------------------------------------------------.
 #   |  ____ _       _           _   ____       _   _   _                   |
@@ -2370,12 +2371,7 @@ class ConfigVariableUserIdleTimeout(ConfigVariable):
 
     def valuespec(self):
         return Optional(
-            Age(
-                title=None,
-                display=["minutes", "hours", "days"],
-                minvalue=5400,
-                default_value=5400,
-            ),
+            valuespec=vs_idle_timeout_duration(),
             title=_("Login session idle timeout"),
             label=_("Enable a login session idle timeout"),
             help=_(
@@ -4192,6 +4188,25 @@ def _valuespec_automatic_rediscover_parameters() -> Transform:
                     ),
                 ),
                 (
+                    "keep_clustered_vanished_services",
+                    DropdownChoice(
+                        title=_("Vanished clustered services"),
+                        help=_(
+                            "By default we keep a record of vanished services on the node if they are assigned to a cluster."
+                            " When a clustered service switches from one node to another, it might not be seen on either node for one check cycle."
+                            " Keeping clustered services indefinitely keeps us from loosing them in this case."
+                            " However this means that truly vanished clustered servces will never be removed from the cluster."
+                            " If you choose to include clustered service in the removal operation, vanished services will be removed from clusters,"
+                            " at the risk of loosing services due to the described race condition."
+                        ),
+                        choices=[
+                            (True, _("Always keep vanished clustered services")),
+                            (False, _("Include vanished clustered services during removal")),
+                        ],
+                        default_value=True,
+                    ),
+                ),
+                (
                     "group_time",
                     Age(
                         title=_("Group discovery and activation for up to"),
@@ -4285,7 +4300,7 @@ def _valuespec_automatic_rediscover_parameters() -> Transform:
                     ),
                 ),
             ],
-            optional_keys=["service_filters"],
+            optional_keys=["service_filters", "keep_clustered_vanished_services"],
         ),
         forth=_transform_automatic_rediscover_parameters,
     )
@@ -5938,7 +5953,7 @@ def _valuespec_snmpv3_contexts():
             Transform(
                 DropdownChoice(
                     title=_("Section name"),
-                    choices=get_snmp_section_names,
+                    choices=lambda: [(None, _("All SNMP sections"))] + get_snmp_section_names(),
                 ),
                 # Legacy plugins had dots in their names, but sections have only ever been
                 # associated with the part left of the dot.
