@@ -10,6 +10,8 @@ from .utils import if64
 # ifAlias or ifDescr may only contain user defined names. DO NOT roll back to ifAlias again
 # (werk 4539 -> werk 6638 -> werk 11267)
 END_OIDS = if64.END_OIDS[:18] + ["31.1.1.1.1"] + if64.END_OIDS[19:]
+# We want to have ifName as ifAlias instead -- jpl@plutex.de 2023-05-09
+END_OIDS = if64.END_OIDS[:1] + ["31.1.1.1.1"] + if64.END_OIDS[2:]
 
 register.snmp_section(
     name="if_fortigate",
