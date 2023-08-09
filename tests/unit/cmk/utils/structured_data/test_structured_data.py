@@ -461,6 +461,8 @@ def test_filtering_node_paths_no_keys():
     filters = _make_filters([(["path", "to", "nta", "ta"], None)])
     filtered_node = filled_root.get_filtered_node(filters).get_node(["path", "to", "nta", "ta"])
     assert filtered_node is not None
+    assert filtered_node.name == "ta"
+    assert filtered_node.path == ("path", "to", "nta", "ta")
 
     assert not filtered_node.attributes.is_empty()
     assert filtered_node.attributes.pairs == {"ta0": "TA 0", "ta1": "TA 1"}
@@ -1185,6 +1187,7 @@ def test__is_table():
             "idx-node": [
                 {
                     "idx-attr": "value",
+                    "idx-enum": ["v1", 1.0, 2, None],
                     "idx-table": [{"idx-col": "value"}],
                     "idx-sub-node": {
                         "foo-node": {
@@ -1240,7 +1243,7 @@ def test__is_table():
 
     idx_node_attr = tree.get_node(["path-to", "idx-node", "0"])
     assert idx_node_attr is not None
-    assert idx_node_attr.attributes.pairs == {"idx-attr": "value"}
+    assert idx_node_attr.attributes.pairs == {"idx-attr": "value", "idx-enum": "v1, 1.0, 2"}
     assert idx_node_attr.table._rows == {}
     assert idx_node_attr.table.rows == []
 

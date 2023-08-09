@@ -125,7 +125,7 @@ section_openbsd_mem() {
 # shellcheck disable=SC2039 # In POSIX sh, set flag -A is undefined.
 section_misc_sections() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p29"
+    echo "Version: 2.1.0p31"
     echo "AgentOS: openbsd"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: $MK_CONFDIR"
@@ -139,6 +139,9 @@ section_misc_sections() {
 
     # processes including username, without kernel processes
     echo '<<<ps>>>'
+    echo "[time]"
+    get_epoch
+    echo "[processes]"
     ps ax -ww -o user,vsz,rss,pcpu,command | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4) /'
 
     echo '<<<cpu>>>'
@@ -178,8 +181,8 @@ section_misc_sections() {
 
     # adjust internal field separator to get lines from netstat and backup it before
     OFS=$IFS
-    IFS='
-'
+    IFS=''
+
     # collect netstat values and interface number
     for NS in $NETSTAT_OUTPUT; do
         NI=$((NI + 1))

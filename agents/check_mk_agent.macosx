@@ -36,7 +36,7 @@ fi
 
 section_checkmk() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p29"
+    echo "Version: 2.1.0p31"
     echo "AgentOS: macosx"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: $MK_CONFDIR"
@@ -88,6 +88,9 @@ run_purely_synchronous_sections() {
     # clean parsing of the output
 
     echo '<<<ps>>>'
+    echo "[time]"
+    get_epoch
+    echo "[processes]"
     ps ax -o user,vsz,rss,pcpu,command | sed -e 1d -e 's/ *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) *\([^ ]*\) */(\1,\2,\3,\4) /'
 
     # NTP seems to be enabled as a default

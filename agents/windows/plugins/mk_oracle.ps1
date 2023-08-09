@@ -1,4 +1,4 @@
-$CMK_VERSION = "2.1.0p29"
+$CMK_VERSION = "2.1.0p31"
 # Copyright (C) 2019 Checkmk GmbH - License: GNU General Public License v2
 # This file is part of Checkmk (https://checkmk.com). It is subject to the terms and
 # conditions defined in the file COPYING, which is part of this source code package.
@@ -190,6 +190,9 @@ set echo on
 # use this workaround to avoid the message that the "<" symbol is reserved for future use
 $LESS_THAN = '<'
 
+Function should_exclude($exclude, $section) {
+    return (($exclude -Match "ALL") -or ($exclude -Match $section))
+}
 
 Function get_dbversion_database ($ORACLE_HOME) {
      # The output of this command contains -- among others -- the version
@@ -2258,16 +2261,14 @@ if ($the_count -gt 0) {
                          # check if $EXCLUDE_SID is used
                          if ("$EXCLUDE_$inst_name" -ne $null) {
                               # if used, then we at first presume that we do not want to skip this section
-                              $SKIP_SECTION = 0
                               # if this SECTION is in our ONLY_SIDS then it will be skipped
-                              if (((get-variable "EXCLUDE_$inst_name").value -contains "ALL") -or ((get-variable "EXCLUDE_$inst_name").value -contains $the_section)) {
-                                   $SKIP_SECTION = 1
-                              }
+                              $instance_exclude = (get-variable "EXCLUDE_$inst_name").value
+                              $SKIP_SECTION = should_exclude $instance_exclude $section
                          }
                          # now we set our action on error back to our normal value
                          $ErrorActionPreference = $NORMAL_ACTION_PREFERENCE
                          debug_echo "value of the_section = ${the_section}"
-                         if ($SKIP_SECTION -eq 0) {
+                         if (-Not ($SKIP_SECTION)) {
                               $THE_NEW_SQL = invoke-expression "${the_section}"
                               $THE_SQL = $THE_SQL + $THE_NEW_SQL
                          }
@@ -2295,18 +2296,16 @@ if ($the_count -gt 0) {
                               # check if $EXCLUDE_SID is used
                               if ("$EXCLUDE_$inst_name" -ne $null) {
                                    # if used, then we at first presume that we do not want to skip this section
-                                   $SKIP_SECTION = 0
                                    # if this SECTION is in our ONLY_SIDS then it will be skipped
                                    # "dynamic variables" are not supported in powershell. For example, $inst_name holds the value of the oracle_sid, let's say "ORCL"
                                    # in powershell, I need to find the value of the variable EXCLUDE_ORCL, I cannot use "EXCLUDE_$inst_name" to reference that
                                    # and so I built the following workaround...
-                                   if (((get-variable "EXCLUDE_$inst_name").value -contains "ALL") -or ((get-variable "EXCLUDE_$inst_name").value -contains $the_section)) {
-                                        $SKIP_SECTION = 1
-                                   }
+                                   $instance_exclude = (get-variable "EXCLUDE_$inst_name").value
+                                   $SKIP_SECTION = should_exclude $instance_exclude $section
                               }
                               # now we set our action on error back to our normal value
                               $ErrorActionPreference = $NORMAL_ACTION_PREFERENCE
-                              if ($SKIP_SECTION -eq 0) {
+                              if (-Not ($SKIP_SECTION)) {
                                    $THE_NEW_SQL = invoke-expression "$the_section"
                                    $THE_SQL = $THE_SQL + $THE_NEW_SQL
                               }

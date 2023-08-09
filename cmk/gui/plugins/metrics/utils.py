@@ -399,9 +399,12 @@ def _split_perf_data(perf_data_string: str) -> List[str]:
     return shlex.split(perf_data_string)
 
 
-def perfvar_translation(perfvar_name: str, check_command: str) -> TranslationInfo:
+def perfvar_translation(
+    perfvar_name: str,
+    check_command: Optional[str],  # None due to CMK-13883
+) -> TranslationInfo:
     """Get translation info for one performance var."""
-    cm = check_metrics.get(check_command, {})
+    cm = lookup_metric_translations_for_check_command(check_metrics, check_command) or {}
     translation_entry = cm.get(perfvar_name, {})  # Default: no translation necessary
 
     if not translation_entry:
@@ -419,7 +422,27 @@ def perfvar_translation(perfvar_name: str, check_command: str) -> TranslationInf
     }
 
 
-def scalar_bounds(perfvar_bounds, scale) -> Dict[str, float]:
+def lookup_metric_translations_for_check_command(
+    all_translations: Mapping[str, Mapping[_MetricName, CheckMetricEntry]],
+    check_command: Optional[str],  # None due to CMK-13883
+) -> Optional[Mapping[_MetricName, CheckMetricEntry]]:
+    if not check_command:
+        return None
+    return all_translations.get(
+        check_command,
+        all_translations.get(
+            check_command.replace(
+                "check_mk-mgmt_",
+                "check_mk-",
+                1,
+            )
+        )
+        if check_command.startswith("check_mk-mgmt_")
+        else None,
+    )
+
+
+def scalar_bounds(perfvar_bounds, scale) -> dict[str, float]:  # type:ignore[no-untyped-def]
     """rescale "warn, crit, min, max" PERFVAR_BOUNDS values
 
     Return "None" entries if no performance data and hence no scalars are available

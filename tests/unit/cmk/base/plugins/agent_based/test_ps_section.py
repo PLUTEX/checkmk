@@ -126,6 +126,15 @@ WSOPREKPFS01,85,126562500,csrss.exe,1176,744,8,468750,44486656,569344
 """,
             "\t",
         ),
+        # solaris, aix with time info
+        splitter(
+            """
+[time]
+1540375343
+[processes]
+(db2prtl,17176,17540,0.0) /usr/lib/ssh/sshd
+"""
+        ),
     ]
 
 
@@ -149,7 +158,10 @@ result_parse = [
                 "--log-target=syslog",
             ],
             [("on", 1050360, 303252, "00:14:59/1-03:59:39", "9902"), "emacs"],
-            [("on", 2924232, 472252, "00:12:05/07:24:15", "7912"), "/usr/lib/firefox/firefox"],
+            [
+                ("on", 2924232, 472252, "00:12:05/07:24:15", "7912"),
+                "/usr/lib/firefox/firefox",
+            ],
             [
                 ("heute", 11180, 1144, "00:00:00/03:54:10", "10884"),
                 "/omd/sites/heute/lib/cmc/checkhelper",
@@ -159,6 +171,7 @@ result_parse = [
                 "/omd/sites/twelve/lib/cmc/checkhelper",
             ],
         ],
+        1540375342,
     ),
     (
         1,
@@ -166,11 +179,15 @@ result_parse = [
             [("root", 4056, 1512, "0.0/52-04:56:05", "5689"), "/usr/lib/ssh/sshd"],
             [("zombie", 0, 0, "-/-", "1952"), "<defunct>"],
         ],
+        1540375342,
     ),
     (
         1,
         [
-            [("SYSTEM", 0, 0, "0", "0", "0", "0", "0", "0", "1", "0"), "System Idle Process"],
+            [
+                ("SYSTEM", 0, 0, "0", "0", "0", "0", "0", "0", "1", "0"),
+                "System Idle Process",
+            ],
             [
                 (
                     "\\NT AUTHORITY\\SYSTEM",
@@ -236,14 +253,16 @@ result_parse = [
                 "NOTEPAD.EXE",
             ],
         ],
+        1540375342,
     ),
-    (1, [[("db2prtl", 17176, 17540, "0.0"), "/usr/lib/ssh/sshd"]]),
+    (1, [[("db2prtl", 17176, 17540, "0.0"), "/usr/lib/ssh/sshd"]], 1540375342),
     (
         1,
         [
             [("oracle", 9588, 298788, "0.0"), "ora_dmon_uc4prd"],
             [("oracle", 11448, 300648, "0.0"), "oraclemetroprd", "(LOCAL=NO)"],
         ],
+        1540375342,
     ),
     (
         2,
@@ -265,6 +284,7 @@ result_parse = [
                 "NOTEPAD.EXE",
             ],
         ],
+        1540375342,
     ),
     (
         24,
@@ -303,6 +323,7 @@ result_parse = [
                 "csrss.exe",
             ],
         ],
+        1540375342,
     ),
     (
         1,
@@ -317,6 +338,7 @@ result_parse = [
                 "-inetd_ipv6",
             ]
         ],
+        1540375342,
     ),
     (
         1,
@@ -331,6 +353,7 @@ result_parse = [
                 "-inetd_ipv6",
             ]
         ],
+        1540375342,
     ),
     (
         1,
@@ -416,7 +439,9 @@ result_parse = [
                 "svchost.exe",
             ],
         ],
+        1540375342,
     ),
+    (1, [[("db2prtl", 17176, 17540, "0.0"), "/usr/lib/ssh/sshd"]], 1540375343),
 ]
 
 
@@ -431,6 +456,7 @@ input_ids = [
     "Second Generation user info only",
     "First Generation process only",
     "windows agent with newline in description",
+    "solaris, aix with time info",
 ]
 
 
@@ -442,8 +468,11 @@ input_ids = [
     ids=input_ids,
 )
 def test_parse_ps(capture, result):
-    cpu_core, lines = ps_section.parse_ps(copy.deepcopy(capture))
+    now = 1540375342
+    cpu_core, lines, ps_time = ps_section._parse_ps(now, copy.deepcopy(capture))
     assert cpu_core == result[0]  # cpu_cores
+
+    assert ps_time == result[2]
 
     for (ps_info_item, cmd_line), ref in itertools.zip_longest(lines, result[1]):
         assert ps_info_item == ps.PsInfo(*ref[0])
@@ -458,6 +487,9 @@ def test_parse_ps(capture, result):
     [
         pytest.param(
             [
+                ["[time]"],
+                [1540375341],
+                ["[processes]"],
                 ["[header]", "CGROUP", "USER", "VSZ", "RSS", "TIME", "ELAPSED", "PID", "COMMAND"],
                 [
                     "1:name=systemd:/init.scope,",
@@ -492,11 +524,15 @@ def test_parse_ps(capture, result):
                         ["/sbin/init", "--ladida"],
                     )
                 ],
+                1540375341,
             ),
             id="standard_case",
         ),
         pytest.param(
             [
+                ["[time]"],
+                [1540375341],
+                ["[processes]"],
                 ["[header]", "CGROUP", "USER", "VSZ", "RSS", "TIME", "ELAPSED", "PID", "COMMAND"],
                 [
                     "9:pids:/system.slice/check-mk-agent-async.service,8:memory:/system.slice/check-mk-agent-async.service,7:devices:/system.slice/check-mk-agent-async.service,6:blkio:/system.slice/check-mk-agent-async.service,5:cpu,cpuacct:/system.slice/check-mk-agent-async.service,1:name=systemd:/system.slice/check-mk-agent-async.service,0::/system.slice/check-mk-agent-async.service",
@@ -560,8 +596,88 @@ def test_parse_ps(capture, result):
                         ["[node]", "<defunct>"],
                     ),
                 ],
+                1540375341,
             ),
             id="with_deleted_cgroup",
+        ),
+        pytest.param(
+            [
+                ["[time]"],
+                [1540375341],
+                ["[processes]"],
+                ["[header]", "CGROUP", "USER", "VSZ", "RSS", "TIME", "ELAPSED", "PID", "COMMAND"],
+                [
+                    "12:pids:/system.slice/srcmstr.service,5:devices:/system.slice/srcmstr.service,1:name=systemd:/system.slice/srcmstr.service",
+                    "root",
+                    "96112",
+                    "3448",
+                    "00:00:00",
+                    "1-05:33:16",
+                    "4515",
+                ],
+            ],
+            (
+                1,
+                [
+                    (
+                        ps.PsInfo(
+                            user="root",
+                            virtual=96112,
+                            physical=3448,
+                            cputime="00:00:00/1-05:33:16",
+                            process_id="4515",
+                            pagefile=None,
+                            usermode_time=None,
+                            kernelmode_time=None,
+                            handles=None,
+                            threads=None,
+                            uptime=None,
+                            cgroup="12:pids:/system.slice/srcmstr.service,5:devices:/system.slice/srcmstr.service,1:name=systemd:/system.slice/srcmstr.service",
+                        ),
+                        [],
+                    ),
+                ],
+                1540375341,
+            ),
+            id="empty command line (SUP-13009)",
+        ),
+        pytest.param(
+            [
+                ["[header]", "CGROUP", "USER", "VSZ", "RSS", "TIME", "ELAPSED", "PID", "COMMAND"],
+                [
+                    "12:pids:/system.slice/srcmstr.service,5:devices:/system.slice/srcmstr.service,1:name=systemd:/system.slice/srcmstr.service",
+                    "root",
+                    "96112",
+                    "3448",
+                    "00:00:00",
+                    "1-05:33:16",
+                    "4515",
+                ],
+            ],
+            (
+                1,
+                [
+                    (
+                        ps.PsInfo(
+                            user="root",
+                            virtual=96112,
+                            physical=3448,
+                            cputime="00:00:00/1-05:33:16",
+                            process_id="4515",
+                            pagefile=None,
+                            usermode_time=None,
+                            kernelmode_time=None,
+                            handles=None,
+                            threads=None,
+                            uptime=None,
+                            cgroup="12:pids:/system.slice/srcmstr.service,5:devices:/system.slice/srcmstr.service,1:name=systemd:/system.slice/srcmstr.service",
+                        ),
+                        [],
+                    ),
+                ],
+                1540375342,
+            ),
+            id="no_time_in_agent_output",
         ),
     ],
 )
@@ -569,4 +685,5 @@ def test_parse_ps_lnx(
     string_table: StringTable,
     expected_result: ps.Section,
 ) -> None:
-    assert ps_section.parse_ps_lnx(string_table) == expected_result
+    now = 1540375342
+    assert ps_section._parse_ps_lnx(now, string_table) == expected_result

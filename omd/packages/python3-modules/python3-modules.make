@@ -11,7 +11,7 @@ PYTHON3_MODULES_DEPS := $(REPO_PATH)/Pipfile.lock \
 	$(wildcard $(REPO_PATH)/agent-receiver/agent_receiver/*.py)
 
 # Increase the number before the "-" to enforce a recreation of the build cache
-PYTHON3_MODULES_BUILD_ID := $(call cache_pkg_build_id,1,$(PYTHON3_MODULES_DEPS))
+PYTHON3_MODULES_BUILD_ID := $(call cache_pkg_build_id,2,$(PYTHON3_MODULES_DEPS))
 
 PYTHON3_MODULES_UNPACK:= $(BUILD_HELPER_DIR)/$(PYTHON3_MODULES_DIR)-unpack
 PYTHON3_MODULES_PATCHING := $(BUILD_HELPER_DIR)/$(PYTHON3_MODULES_DIR)-patching
@@ -49,7 +49,7 @@ $(PYTHON3_MODULES_BUILD): $(PYTHON_CACHE_PKG_PROCESS) $(OPENSSL_CACHE_PKG_PROCES
 	    `: rrdtool module is built with rrdtool omd package` \
 	    `: protobuf module is built with protobuf omd package` \
 	    `: fixup git local dependencies` \
-		pipenv lock -r | grep -Ev '(protobuf|rrdtool)' | sed 's|-e \.\/\(.*\)|$(REPO_PATH)\/\1|g' > requirements-dist.txt ; \
+		pipenv lock -r | grep -Ev '(protobuf|rrdtool|pymssql)' | sed 's|-e \.\/\(.*\)|$(REPO_PATH)\/\1|g' > requirements-dist.txt ; \
 # rpath: Create some dummy rpath which has enough space for later replacement
 # by the final rpath
 	set -e ; cd $(PYTHON3_MODULES_BUILD_DIR) ; \
@@ -62,6 +62,21 @@ $(PYTHON3_MODULES_BUILD): $(PYTHON_CACHE_PKG_PROCESS) $(OPENSSL_CACHE_PKG_PROCES
 	    export LD_LIBRARY_PATH="$(PACKAGE_PYTHON_LD_LIBRARY_PATH):$(PACKAGE_OPENSSL_LD_LIBRARY_PATH)" ; \
 	    export PATH="$(PACKAGE_PYTHON_BIN):$$PATH" ; \
 	    export CFLAGS="-I$(PACKAGE_PYTHON_INCLUDE_PATH) $$CFLAGS" ; \
+	    `: Make git command work with system ssl while we keep using our own for building` \
+            export PATH="$(PYTHON3_MODULES_WORK_DIR):$$PATH" ; \
+            mkdir -p "$(PYTHON3_MODULES_WORK_DIR)" ; \
+            install -m 755 "$(PACKAGE_DIR)/omd/use_system_openssl" "$(PYTHON3_MODULES_WORK_DIR)/git" ; \
+		GIT_SSL_CAINFO=$(REPO_PATH)/omd/packages/python3-modules/github-com.pem \
+		$(PACKAGE_PYTHON_EXECUTABLE) -m pip install \
+		`: dont use precompiled things, build with our build env ` \
+		--no-binary=":all:" \
+		--no-deps \
+		--compile \
+		--isolated \
+		--ignore-installed \
+		--no-warn-script-location \
+		--prefix="$(PYTHON3_MODULES_INSTALL_DIR)" \
+		git+https://github.com/JonasScharpf/pymssql.git@cython3_fix_v227 ; \
 	    $(PACKAGE_PYTHON_EXECUTABLE) -m pip install \
 		`: dont use precompiled things, build with our build env ` \
 		--no-binary=":all:" \
@@ -71,7 +86,7 @@ $(PYTHON3_MODULES_BUILD): $(PYTHON_CACHE_PKG_PROCESS) $(OPENSSL_CACHE_PKG_PROCES
 		--ignore-installed \
 		--no-warn-script-location \
 		--prefix="$(PYTHON3_MODULES_INSTALL_DIR)" \
-		-r requirements-dist.txt
+		-r requirements-dist.txt ; \
 # For some highly obscure unknown reason some files end up world-writable. Fix that!
 	chmod -R o-w $(PYTHON3_MODULES_INSTALL_DIR)/lib/python$(PYTHON_MAJOR_DOT_MINOR)/site-packages
 # Cleanup some unwanted files (example scripts)
