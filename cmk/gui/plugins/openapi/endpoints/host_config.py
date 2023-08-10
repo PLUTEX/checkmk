@@ -62,7 +62,7 @@ from cmk.gui.plugins.openapi.restful_objects import (
     response_schemas,
 )
 from cmk.gui.plugins.openapi.restful_objects.parameters import HOST_NAME
-from cmk.gui.plugins.openapi.utils import problem, serve_json
+from cmk.gui.plugins.openapi.utils import EXT, problem, serve_json
 from cmk.gui.plugins.webapi.utils import check_hostname
 from cmk.gui.watolib import hosts_and_folders
 from cmk.gui.watolib.host_rename import perform_rename_hosts
@@ -244,10 +244,12 @@ def _bulk_host_action_response(
             title="Some actions failed",
             detail=f"Some of the actions were performed but the following were faulty and "
             f"were skipped: {' ,'.join(failed_hosts)}.",
-            ext={
-                "succeeded_hosts": _host_collection(succeeded_hosts),
-                "failed_hosts": failed_hosts,
-            },
+            ext=EXT(
+                {
+                    "succeeded_hosts": _host_collection(succeeded_hosts),
+                    "failed_hosts": failed_hosts,
+                }
+            ),
         )
 
     return serve_host_collection(succeeded_hosts)
@@ -435,7 +437,15 @@ def bulk_update_hosts(params):
     constructors.object_action_href("host_config", "{host_name}", action_name="rename"),
     "cmk/rename",
     method="put",
-    path_params=[HOST_NAME],
+    path_params=[
+        {
+            "host_name": gui_fields.HostField(
+                description="A hostname.",
+                should_exist=True,
+                permission_type="setup_write",
+            ),
+        }
+    ],
     etag="both",
     additional_status_codes=[409, 422],
     status_descriptions={
@@ -558,7 +568,15 @@ def bulk_delete(params):
     constructors.object_href("host_config", "{host_name}"),
     "cmk/show",
     method="get",
-    path_params=[HOST_NAME],
+    path_params=[
+        {
+            "host_name": gui_fields.HostField(
+                description="A hostname.",
+                should_exist=True,
+                permission_type="setup_read",
+            )
+        }
+    ],
     query_params=[EFFECTIVE_ATTRIBUTES],
     etag="output",
     response_schema=response_schemas.HostConfigSchema,
@@ -639,7 +657,7 @@ def _require_host_etag(host):
     etag_values = _host_etag_values(host)
     constructors.require_etag(
         constructors.etag_of_dict(etag_values),
-        error_details=etag_values,
+        error_details=EXT(etag_values),
     )
 
 
