@@ -14,12 +14,12 @@ You can find an introduction to time periods in the
 
 import datetime as dt
 import http.client
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Mapping, Tuple, Union
 
 from marshmallow.utils import from_iso_time
 
 import cmk.utils.defines as defines
-from cmk.utils.type_defs import TimeperiodSpec
+from cmk.utils.type_defs import TimeperiodSpec, TimeperiodSpecs
 
 from cmk.gui.globals import user
 from cmk.gui.http import Response
@@ -35,11 +35,14 @@ from cmk.gui.plugins.openapi.restful_objects import constructors, Endpoint, perm
 from cmk.gui.plugins.openapi.restful_objects.parameters import NAME_FIELD
 from cmk.gui.plugins.openapi.restful_objects.type_defs import DomainObject
 from cmk.gui.plugins.openapi.utils import problem, ProblemException, serve_json
+from cmk.gui.watolib.timeperiods import create_timeperiod as _create_timeperiod
 from cmk.gui.watolib.timeperiods import (
     delete_timeperiod,
     load_timeperiod,
     load_timeperiods,
-    save_timeperiod,
+    modify_timeperiod,
+    TimePeriodBuiltInError,
+    TimePeriodInUseError,
     TimePeriodNotFoundError,
 )
 
@@ -97,7 +100,7 @@ def create_timeperiod(params):
     time_period = _to_checkmk_format(
         alias=body["alias"], periods=periods, exceptions=exceptions, exclude=body.get("exclude", [])
     )
-    save_timeperiod(name, time_period)
+    _create_timeperiod(name, time_period)
     return _serve_time_period(_get_time_period_domain_object(name, _to_api_format(time_period)))
 
 
@@ -137,7 +140,7 @@ def update_timeperiod(params):
         exclude=body.get("exclude", parsed_time_period["exclude"]),
     )
     api_format_response = _to_api_format(updated_time_period)
-    save_timeperiod(name, updated_time_period)
+    modify_timeperiod(name, updated_time_period)
     return _serve_time_period(_get_time_period_domain_object(name, api_format_response))
 
 
@@ -149,6 +152,7 @@ def update_timeperiod(params):
     etag="input",
     output_empty=True,
     permissions_required=RW_PERMISSIONS,
+    additional_status_codes=[405, 409],
 )
 def delete(params):
     """Delete a time period"""
@@ -159,6 +163,18 @@ def delete(params):
         delete_timeperiod(name)
     except TimePeriodNotFoundError:
         return time_period_not_found_problem(name)
+    except TimePeriodBuiltInError:
+        return problem(
+            status=405,
+            title="Builtin time periods can not be deleted",
+            detail=f"The built-in time period '{name}' cannot be deleted.",
+        )
+    except TimePeriodInUseError as e:
+        return problem(
+            status=409,
+            title="The time period is still in use",
+            detail=f"The time period is still in use ({', '.join(u[0] for u in e.usages)}).",
+        )
 
     return Response(status=204)
 
@@ -236,7 +252,12 @@ def _to_api_format(
     """
     time_period_readable: Dict[str, Any] = {"alias": time_period["alias"]}
     if not builtin_period:
-        time_period_readable["exclude"] = time_period.get("exclude", [])
+        time_period_readable["exclude"] = []
+        all_time_periods = load_timeperiods()
+        time_period_readable["exclude"] = [
+            _time_period_alias_from_name(time_period_name, all_time_periods)  # type: ignore
+            for time_period_name in time_period.get("exclude", [])  # type: ignore
+        ]
 
     active_time_ranges = _active_time_ranges_readable(
         {key: time_period[key] for key in defines.weekday_ids()}
@@ -424,10 +445,37 @@ def _to_checkmk_format(
     exceptions: Dict[str, Any],
     exclude: List[str],
 ) -> TimeperiodSpec:
-    time_period: Dict[str, Any] = {"alias": alias}
+    time_period: dict[str, Any] = {"alias": alias, "exclude": []}
     time_period.update(exceptions)
     time_period.update(periods)
-    if exclude is None:
-        exclude = []
-    time_period["exclude"] = exclude
+
+    if exclude:
+        time_periods_by_alias: dict[str, str] = {
+            time_period["alias"]: name for name, time_period in load_timeperiods().items()  # type: ignore
+        }
+
+        time_period["exclude"] = [
+            _time_period_name_from_alias(time_period_alias, time_periods_by_alias)
+            for time_period_alias in exclude
+        ]
+
     return time_period
+
+
+def _time_period_name_from_alias(alias: str, time_periods_by_alias: Mapping[str, str]) -> str:
+    if alias not in time_periods_by_alias:
+        raise TimePeriodNotFoundError(alias)
+
+    return time_periods_by_alias[alias]
+
+
+def _time_period_alias_from_name(name: str, time_periods: TimeperiodSpecs) -> str:
+    if name not in time_periods:
+        raise TimePeriodNotFoundError(name)
+
+    alias = time_periods[name]["alias"]
+
+    if isinstance(alias, list):
+        raise ValueError("Alias is not a string")
+
+    return alias

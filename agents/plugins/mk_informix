@@ -9,7 +9,7 @@
 
 # Disable unused variable error (needed to keep track of version)
 # shellcheck disable=SC2034
-CMK_VERSION="2.1.0p32"
+CMK_VERSION="2.1.0p33"
 
 # Informix
 # Make ENV-VARs avail for subshells
@@ -178,6 +178,7 @@ informix_logusage() {
 #       EXCLUDES="SECTION SECTION ..."
 #       EXCLUDES=ALL
 
+# shellcheck disable=SC1091 # TODO: add a configuration example and remove this suppression
 # shellcheck source=agents/cfg_examples/informix.cfg
 . "$MK_CONFDIR/informix.cfg" 2>/dev/null
 

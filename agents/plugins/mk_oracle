@@ -9,7 +9,7 @@
 
 # Disable unused variable error (needed to keep track of version)
 # shellcheck disable=SC2034
-CMK_VERSION="2.1.0p32"
+CMK_VERSION="2.1.0p33"
 
 # Checkmk agent plugin for monitoring ORACLE databases
 # This plugin is a result of the common work of Thorsten Bruhns
@@ -2589,6 +2589,7 @@ mk_ora_db_connect() {
         logging "[${sid}] [mk_ora_db_connect]" "TNS CFGTNSALIAS: $CFGTNSALIAS"
     fi
 
+    TNSPINGOK=no
     if [ -f "${TNS_ADMIN}/tnsnames.ora" ]; then
         if [ "${ORADBUSER:0:2}" = '/@' ]; then
             P_TNSALIAS_P=$(eval echo "${ORADBUSER:2}")
@@ -2606,8 +2607,6 @@ mk_ora_db_connect() {
                 P_TNSALIAS_P="$PREFIX_SID$P_TNSALIAS_P"
             elif [ -n "$PREFIX" ]; then
                 P_TNSALIAS_P="$PREFIX$P_TNSALIAS_P"
-            else
-                P_TNSALIAS_P="$P_TNSALIAS_P"
             fi
 
             POSTFIX_SID="POSTFIX_$sid"
@@ -2616,12 +2615,25 @@ mk_ora_db_connect() {
                 P_TNSALIAS_P="$P_TNSALIAS_P$POSTFIX_SID"
             elif [ -n "$POSTFIX" ]; then
                 P_TNSALIAS_P="$P_TNSALIAS_P$POSTFIX"
-            else
-                P_TNSALIAS_P="$P_TNSALIAS_P"
             fi
         fi
 
         TNSALIAS=${SQLS_TNSALIAS:-${P_TNSALIAS_P}}
+
+        logging "[${sid}] [mk_ora_db_connect]" "TNS Alias PING: $TNSALIAS"
+
+        if [ -f "${ORACLE_HOME}"/bin/tnsping ]; then
+            if "${ORACLE_HOME}"/bin/tnsping "$TNSALIAS" >/dev/null 2>&1; then
+                TNSPINGOK=yes
+            else
+                unset TNSALIAS
+            fi
+        else
+            # if the binary tnsping does not exist we can not check whether the
+            # database is reachable or not, so we assume the database is
+            # reachable:
+            TNSPINGOK=yes
+        fi
     else
         if [ -z "$CFGTNSALIAS" ]; then
             unset TNSALIAS
@@ -2635,7 +2647,8 @@ mk_ora_db_connect() {
         "DB sys connect : $DBSYSCONNECT" \
         "DB host        : $DBHOST" \
         "DB port        : $DBPORT" \
-        "TNS alias      : $TNSALIAS"
+        "TNS alias      : $TNSALIAS" \
+        "TNS PING       : ${TNSPINGOK}"
 
     if [ ! "${ORACFGLINE}" ]; then
         # no configuration found
@@ -2653,7 +2666,7 @@ mk_ora_db_connect() {
             # connect with / and wallet
             ORADBUSER=""
             DBPASSWORD=""
-            if [ -z "$CFGTNSALIAS" ]; then
+            if [ -z "$CFGTNSALIAS" ] && [ "$TNSPINGOK" = 'no' ]; then
                 # create an EZCONNECT string when no tnsnames.ora is usable
                 # or no alias is configured in CFGTNSALIAS
                 # defaults to localhost:1521/<ORACLE_SID>
@@ -2951,6 +2964,7 @@ export -f handle_custom_sql_errors
 
 set_up_tmpdirs() {
     ORA_TMPDIR="${MK_VARDIR}/tmp/mk_oracle_tmp_dir"
+    # why don't we use /tmp to make cleanup easier?
     ORA_TASKS_TMPDIR="${ORA_TMPDIR}/tasks"
     mkdir -p "$ORA_TASKS_TMPDIR"
 }
@@ -3031,6 +3045,9 @@ main_queries() {
         _QUERY_PREFIX=$$
     fi
 
+    logging "[local] setting up intermediate query result directory '${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX}'"
+    mkdir -p "${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX}"
+
     TASK_NR=0
     for sid in $SIDS; do
         skip=$(skip_sid "$sid")
@@ -3040,7 +3057,9 @@ main_queries() {
         fi
         ((TASK_NR++))
         logging "[${sid}] [local] starting background task '${TASK_NR}'"
-        (execute_queries_for_sid "$sid" >"$ORA_TASKS_TMPDIR/${_QUERY_PREFIX}-$sid") &
+        SID_QUERY_FILE="${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX}/SID-$sid"
+
+        (execute_queries_for_sid "$sid" >"${SID_QUERY_FILE}") &
         if [[ $(jobs -r -p | wc -l) -ge ${MAX_TASKS} ]]; then
             logging "[${sid}] [local] max parallel task running, waiting for new slot"
             if ((BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3)); then
@@ -3049,12 +3068,24 @@ main_queries() {
                 wait
             fi
         fi
+
+        if [ ! -f "${SID_QUERY_FILE}" ]; then
+            logging "[local] No intermediate query result file '${SID_QUERY_FILE}' exists"
+        fi
     done
 
     wait
 
-    cat "$ORA_TASKS_TMPDIR/${_QUERY_PREFIX}"*
-    rm -f "$ORA_TASKS_TMPDIR"/*
+    cat "${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX}/SID"*
+
+    cleanup_queries() {
+        logging "[local] cleaning up intermediate query result directory '${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX}'"
+        rm -rf "${ORA_TASKS_TMPDIR}/${_QUERY_PREFIX:?}" >/dev/null 2>&1
+        logging "[local] cleaning up any old query result directories in '${ORA_TASKS_TMPDIR}'"
+        # in case process was previously stopped via kill -9 and could not clean up
+        find "${ORA_TASKS_TMPDIR}/*" -type d -mtime +1 -exec rm -r {} + >/dev/null 2>&1
+    }
+    trap cleanup_queries HUP INT QUIT ABRT ALRM TERM EXIT
 
     #   ---remote---------------------------------------------------------------
 

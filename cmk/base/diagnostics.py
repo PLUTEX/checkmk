@@ -57,9 +57,13 @@ from cmk.utils.type_defs import HostName
 
 import cmk.base.section as section
 
-if cmk_version.is_enterprise_edition():
-    # type: ignore[import] # noqa: F401 # pylint: disable=no-name-in-module,import-error
-    from cmk.base.cee.diagnostics import cmc_specific_attrs
+if cmk_version.edition() in [
+    cmk_version.Edition.CEE,
+    cmk_version.Edition.CME,
+]:
+    from cmk.base.cee.diagnostics import (  # type: ignore[import]  # pylint: disable=no-name-in-module,import-error
+        cmc_specific_attrs,
+    )
 else:
 
     def cmc_specific_attrs() -> Mapping[str, int]:
@@ -147,6 +151,7 @@ class DiagnosticsDump:
             HWDiagnosticsElement(),
             EnvironmentDiagnosticsElement(),
             FilesSizeCSVDiagnosticsElement(),
+            SELinuxJSONDiagnosticsElement(),
         ]
 
     def _get_optional_elements(
@@ -630,6 +635,30 @@ class LocalFilesJSONDiagnosticsElement(ABCDiagnosticsElementJSONDump):
         return get_all_package_infos()
 
 
+class SELinuxJSONDiagnosticsElement(ABCDiagnosticsElementJSONDump):
+    @property
+    def ident(self) -> str:
+        return "selinux"
+
+    @property
+    def title(self) -> str:
+        return _("SELinux information")
+
+    @property
+    def description(self) -> str:
+        return _("Output of `sestatus`. See the corresponding commandline help for more details.")
+
+    def _collect_infos(self, collectors: Collectors) -> DiagnosticsElementJSONResult:
+        if not (selinux_binary := shutil.which("sestatus")):
+            return {}
+
+        return {
+            line.split(":")[0]: line.split(":")[1].lstrip()
+            for line in subprocess.check_output(selinux_binary, text=True).split("\n")
+            if ":" in line
+        }
+
+
 class OMDConfigDiagnosticsElement(ABCDiagnosticsElementJSONDump):
     @property
     def ident(self) -> str:
@@ -902,7 +931,6 @@ class CMCDumpDiagnosticsElement(ABCDiagnosticsElement):
     def add_or_get_files(
         self, tmp_dump_folder: Path, collectors: Collectors
     ) -> DiagnosticsElementFilepaths:
-
         command = [str(Path(cmk.utils.paths.omd_root).joinpath("bin/cmcdump"))]
 
         for dump_args in (None, "config"):

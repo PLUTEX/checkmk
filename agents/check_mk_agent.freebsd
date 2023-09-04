@@ -223,7 +223,7 @@ unset_locale() {
 
 section_checkmk() {
     echo "<<<check_mk>>>"
-    echo "Version: 2.1.0p32"
+    echo "Version: 2.1.0p33"
     echo "AgentOS: freebsd"
     echo "Hostname: $(hostname)"
     echo "AgentDirectory: ${MK_CONFDIR}"
@@ -734,7 +734,7 @@ get_plugin_interpreter() {
         return 0
     fi
 
-    if [ "${filename#${filename%??}}" != "_2" ]; then
+    if [ "${filename#"${filename%??}"}" != "_2" ]; then
         if [ -n "${NO_PYTHON}" ] || [ -n "${WRONG_PYTHON_COMMAND}" ]; then
             section_checkmk_failed_plugin "${agent_plugin}"
             return 1
