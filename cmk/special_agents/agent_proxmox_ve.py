@@ -101,7 +101,7 @@ class BackupTask:
         if dump_logs:
             with (LogCacheFilePath / (f"{task['upid']}.log")).open("w") as file:
                 LOGGER.debug("wrote log to: %s", file.name)
-                file.write("\n".join(line["t"] for line in logs))
+                file.write("\n".join(line.get("t", "") for line in logs))
 
         try:
             self.backup_data, errors = self._extract_logs(self._to_lines(logs), strict)
@@ -127,7 +127,7 @@ class BackupTask:
                     task["upid"],
                     file.name,
                 )
-                file.write("\n".join(line["t"] for line in logs))
+                file.write("\n".join(line.get("t", "") for line in logs))
                 for linenr, text in errors:
                     file.write("PARSE-ERROR: %d: %s\n" % (linenr, text))
 
@@ -142,7 +142,7 @@ class BackupTask:
         return (  #
             line  #
             for elem in lines_with_numbers  #
-            for line in (elem["t"],)  #
+            for line in (elem.get("t", ""),)  #
             if isinstance(line, str) and line.strip()
         )
 
